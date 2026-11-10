@@ -33,11 +33,11 @@ except ImportError:
 # Global Paths & Constants
 # ==============================================================================
 
-APP_NAME = "Snapchat Streak Hub"
+APP_NAME = "snapchat-streak"
 CURRENT_VERSION = "1.0.0"
-REPO_RAW_URL = "https://raw.githubusercontent.com/sammmms/snapchat-streak/main"
-VERSION_JSON_URL = f"{REPO_RAW_URL}/version.json"
-SCRIPT_RAW_URL = f"{REPO_RAW_URL}/snapchat-streak.py"
+PRIMARY_UPDATE_URL = f"https://wsnsam.my.id/api/updates?app={APP_NAME}"
+FALLBACK_UPDATE_URL = f"https://raw.githubusercontent.com/sammmms/{APP_NAME}/main/version.json"
+SCRIPT_RAW_URL = f"https://raw.githubusercontent.com/sammmms/{APP_NAME}/main/snapchat-streak.py"
 
 HOME_DIR = os.path.expanduser("~")
 BASE_DIR = os.path.join(HOME_DIR, ".snapchat-streak")
@@ -73,22 +73,30 @@ def parse_semver(ver: str) -> tuple:
 def check_for_updates(prompt_if_latest: bool = False):
     """Checks remote repository for newer version with progress indicator."""
     print("[*] Memeriksa pembaruan terbaru...", end="", flush=True)
-    try:
-        resp = requests.get(VERSION_JSON_URL, timeout=4)
-        if resp.status_code != 200:
-            print(" [Lewati: Gagal terhubung]")
-            if prompt_if_latest:
-                questionary.press_any_key_to_continue().ask()
-            return
+    update_data = None
+    for target_url in [PRIMARY_UPDATE_URL, FALLBACK_UPDATE_URL]:
+        try:
+            resp = requests.get(target_url, timeout=4)
+            if resp.status_code == 200:
+                update_data = resp.json()
+                break
+        except Exception:
+            continue
 
-        data = resp.json()
-        remote_ver_str = data.get("version", CURRENT_VERSION)
+    if not update_data:
+        print(" [Lewati: Offline]")
+        if prompt_if_latest:
+            questionary.press_any_key_to_continue().ask()
+        return
+
+    try:
+        remote_ver_str = update_data.get("version", CURRENT_VERSION)
         remote_ver = parse_semver(remote_ver_str)
         local_ver = parse_semver(CURRENT_VERSION)
 
         if remote_ver > local_ver:
             print(f" [Versi Baru Tersedia: v{remote_ver_str}!]")
-            changelogs = data.get("changelog", [])
+            changelogs = update_data.get("changelog", [])
             print("\n" + "=" * 60)
             print(f"🎉 Pembaruan Snapchat Streak v{remote_ver_str} Tersedia! (Versi saat ini: v{CURRENT_VERSION})")
             print("=" * 60)
@@ -105,7 +113,8 @@ def check_for_updates(prompt_if_latest: bool = False):
 
             if update_now:
                 print(f"\n[*] Mengunduh snapchat-streak.py v{remote_ver_str}...")
-                dl_resp = requests.get(SCRIPT_RAW_URL, timeout=15)
+                dl_url = update_data.get("download_url", SCRIPT_RAW_URL)
+                dl_resp = requests.get(dl_url, timeout=15)
                 if dl_resp.status_code == 200 and len(dl_resp.text) > 1000:
                     target_installed = os.path.join(BASE_DIR, "snapchat-streak.py")
                     repo_file = os.path.abspath(__file__)
@@ -131,7 +140,7 @@ def check_for_updates(prompt_if_latest: bool = False):
                 print(f"\n[✓] Anda sudah menggunakan versi paling baru (v{CURRENT_VERSION}).\n")
                 questionary.press_any_key_to_continue().ask()
     except Exception:
-        print(" [Lewati: Offline]")
+        print(" [Lewati: Error]")
         if prompt_if_latest:
             questionary.press_any_key_to_continue().ask()
 
