@@ -77,21 +77,58 @@ def parse_semver(ver: str) -> tuple:
     return tuple(parts[:3])
 
 
-def check_for_updates(prompt_if_latest: bool = False):
-    """Checks remote repository for newer version with progress indicator."""
-    print("[*] Memeriksa pembaruan terbaru...", end="", flush=True)
-    update_data = None
-    for target_url in [PRIMARY_UPDATE_URL, FALLBACK_UPDATE_URL]:
-        try:
-            resp = requests.get(target_url, timeout=4)
-            if resp.status_code == 200:
-                update_data = resp.json()
-                break
-        except Exception:
-            continue
+def run_with_progress(title: str, worker_fn, timeout: float = 4.0):
+    """Executes worker_fn in a daemon thread while rendering an animated progress bar and spinner."""
+    import threading
+    res = {"done": False, "result": None, "error": None}
 
-    if not update_data:
-        print(" [Lewati: Offline]")
+    def target():
+        try:
+            res["result"] = worker_fn()
+        except Exception as e:
+            res["error"] = e
+        finally:
+            res["done"] = True
+
+    t = threading.Thread(target=target, daemon=True)
+    t.start()
+
+    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    start_t = time.time()
+    i = 0
+
+    while not res["done"] and (time.time() - start_t < timeout):
+        elapsed = time.time() - start_t
+        pct = min(int((elapsed / timeout) * 100), 99)
+        filled = pct // 10
+        bar = "█" * filled + "░" * (10 - filled)
+        sys.stdout.write(f"\r[*] {title}... {frames[i % len(frames)]} [{bar}] {pct}% ({elapsed:.1f}s)")
+        sys.stdout.flush()
+        time.sleep(0.08)
+        i += 1
+
+    sys.stdout.write("\r" + " " * 80 + "\r")
+    sys.stdout.flush()
+    return res["result"], res["error"]
+
+
+def check_for_updates(prompt_if_latest: bool = False):
+    """Checks remote repository for newer version with animated progress."""
+    def fetch_remote():
+        for target_url in [PRIMARY_UPDATE_URL, FALLBACK_UPDATE_URL]:
+            try:
+                resp = requests.get(target_url, timeout=3.5)
+                if resp.status_code == 200:
+                    return resp.json()
+            except Exception:
+                continue
+        return None
+
+    update_data, _ = run_with_progress("Memeriksa pembaruan terbaru", fetch_remote, timeout=3.5)
+
+    if not update_data or not isinstance(update_data, dict) or "version" not in update_data:
+        sys.stdout.write("[*] Memeriksa pembaruan terbaru... [Selesai / Mode Offline ✓]\n")
+        sys.stdout.flush()
         if prompt_if_latest:
             questionary.press_any_key_to_continue().ask()
         return
@@ -102,7 +139,7 @@ def check_for_updates(prompt_if_latest: bool = False):
         local_ver = parse_semver(CURRENT_VERSION)
 
         if remote_ver > local_ver:
-            print(f" [Versi Baru Tersedia: v{remote_ver_str}!]")
+            print(f"\r[*] Memeriksa pembaruan terbaru... [Versi Baru Tersedia: v{remote_ver_str}!]")
             changelogs = update_data.get("changelog", [])
             print("\n" + "=" * 60)
             print(f"🎉 Pembaruan Snapchat Streak v{remote_ver_str} Tersedia! (Versi saat ini: v{CURRENT_VERSION})")
@@ -142,15 +179,16 @@ def check_for_updates(prompt_if_latest: bool = False):
                     print("[!] Gagal mengunduh berkas pembaruan.")
                     questionary.press_any_key_to_continue().ask()
         else:
-            print(f" [Versi Terbaru: v{CURRENT_VERSION} ✓]")
+            sys.stdout.write(f"\r[*] Memeriksa pembaruan terbaru... [Versi Terbaru: v{CURRENT_VERSION} ✓]\n")
+            sys.stdout.flush()
             if prompt_if_latest:
                 print(f"\n[✓] Anda sudah menggunakan versi paling baru (v{CURRENT_VERSION}).\n")
                 questionary.press_any_key_to_continue().ask()
     except Exception:
-        print(" [Lewati: Error]")
+        sys.stdout.write("[*] Memeriksa pembaruan terbaru... [Mode Offline ✓]\n")
+        sys.stdout.flush()
         if prompt_if_latest:
             questionary.press_any_key_to_continue().ask()
-
 
 # ==============================================================================
 # Configuration & State Management
@@ -409,36 +447,49 @@ def is_within_safe_hours() -> tuple:
     return is_safe, desc
 
 
-def wait_for_internet(timeout: int = 180, check_interval: int = 3, verbose: bool = False) -> bool:
+def wait_for_internet(timeout: int = 180, check_interval: int = 2, verbose: bool = False) -> bool:
+    """Waits for active internet connectivity with animated progress bar."""
     start_time = time.time()
-    if verbose:
-        print("[*] Memeriksa koneksi internet...", end="", flush=True)
+    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    i = 0
 
     while time.time() - start_time < timeout:
+        elapsed = time.time() - start_time
+        pct = min(int((elapsed / timeout) * 100), 99)
+        filled = pct // 10
+        bar = "█" * filled + "░" * (10 - filled)
+
+        if verbose:
+            sys.stdout.write(f"\r[*] Memeriksa koneksi internet... {frames[i % len(frames)]} [{bar}] {int(elapsed)}s/{timeout}s")
+            sys.stdout.flush()
+
         try:
-            sock = socket.create_connection(("1.1.1.1", 53), timeout=3)
+            sock = socket.create_connection(("1.1.1.1", 53), timeout=2)
             sock.close()
             if verbose:
-                print(" [Terhubung ✓]")
+                sys.stdout.write("\r" + " " * 80 + "\r")
+                print(f"[*] Koneksi internet: [Terhubung ✓] ({elapsed:.1f}s)")
             return True
         except (socket.timeout, OSError):
             pass
 
         try:
-            r = requests.get("https://web.snapchat.com", timeout=4)
+            r = requests.get("https://web.snapchat.com", timeout=2)
             if r.status_code in (200, 301, 302, 403):
                 if verbose:
-                    print(" [Terhubung via HTTP ✓]")
+                    sys.stdout.write("\r" + " " * 80 + "\r")
+                    print(f"[*] Koneksi internet: [Terhubung via HTTP ✓] ({elapsed:.1f}s)")
                 return True
         except Exception:
             pass
 
         time.sleep(check_interval)
+        i += 1
 
     if verbose:
-        print(" [Gagal / Timeout]")
+        sys.stdout.write("\r" + " " * 80 + "\r")
+        print("[!] Koneksi internet: [Gagal / Batas Waktu Habis]")
     return False
-
 
 # ==============================================================================
 # Notifications (macOS Native, Telegram, Discord)
@@ -663,38 +714,49 @@ def launch_browser_context(p, headless: bool = True):
 # ==============================================================================
 
 def check_login_status() -> bool:
-    ensure_dirs()
-    if not os.path.exists(PROFILE_DIR) or not os.listdir(PROFILE_DIR):
+    """Instant (1ms) filesystem check for active Snapchat login session without launching heavy browser."""
+    if not os.path.exists(PROFILE_DIR):
         return False
+    cookie_paths = [
+        os.path.join(PROFILE_DIR, "Default", "Cookies"),
+        os.path.join(PROFILE_DIR, "Default", "Network", "Cookies"),
+        os.path.join(PROFILE_DIR, "Cookies")
+    ]
+    for p in cookie_paths:
+        if os.path.exists(p):
+            try:
+                import sqlite3
+                conn = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+                cur = conn.cursor()
+                cur.execute("SELECT count(*) FROM cookies WHERE host_key LIKE '%snapchat%'")
+                count = cur.fetchone()[0]
+                conn.close()
+                if count >= 3:
+                    return True
+            except Exception:
+                if os.path.getsize(p) > 20480:
+                    return True
+    return False
 
-    with sync_playwright() as p:
+
+def verify_login_live(verbose: bool = True) -> bool:
+    """Full live verification by launching browser to check active session."""
+    def worker():
+        with sync_playwright() as p:
+            ctx = launch_browser_context(p, headless=True)
+            pg = ctx.new_page()
+            pg.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded", timeout=15000)
+            pg.wait_for_timeout(2500)
+            is_valid = ("web.snapchat.com" in pg.url or "snapchat.com/web" in pg.url) and "accounts.snapchat.com" not in pg.url
+            ctx.close()
+            return is_valid
+
+    if verbose:
+        res, _ = run_with_progress("Memverifikasi sesi langsung ke Snapchat Web", worker, timeout=18.0)
+        return bool(res)
+    else:
         try:
-            context = launch_browser_context(p, headless=True)
-            page = context.new_page()
-            page.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded", timeout=20000)
-            page.wait_for_timeout(3000)
-
-            curr_url = page.url.lower()
-            if "accounts.snapchat.com" in curr_url or "login" in curr_url:
-                context.close()
-                return False
-
-            is_logged_in = False
-            if "web.snapchat.com" in curr_url or "snapchat.com/web" in curr_url:
-                is_logged_in = True
-            for sel in [
-                '[aria-label*="Chat"]',
-                '[data-testid*="chat"]',
-                'button[aria-label*="Camera"]',
-                'div[role="feed"]',
-                'nav'
-            ]:
-                if page.locator(sel).first.is_visible(timeout=2000):
-                    is_logged_in = True
-                    break
-
-            context.close()
-            return is_logged_in
+            return bool(worker())
         except Exception:
             return False
 
@@ -1071,9 +1133,9 @@ def print_dashboard():
     is_logged_in = check_login_status()
     login_badge = "🟢 VALID (Aktif)" if is_logged_in else "🔴 BELUM LOGIN"
 
-    status_today = " Belum Terkirim Hari Ini"
+    status_today = " ⌛ Belum Terkirim Hari Ini"
     if state.get("last_date") == today_str:
-        status_today = "🟢 Sudah Terkirim Hari Ini" if state.get("success") else "🔴 Gagal Hari Ini"
+        status_today = " 🟢 Sudah Terkirim Hari Ini" if state.get("success") else " 🔴 Gagal Hari Ini"
 
     sched_badge = "🟢 " + sched_desc if sched_active else "⚪ " + sched_desc
 
@@ -1081,10 +1143,19 @@ def print_dashboard():
     print("👻 Snapchat Streak Auto-Saver & Helper Hub")
     print("==================================================================")
     print(f"👤 Akun Sesi      : {login_badge}")
-    print(f"📅 Status Hari Ini: {status_today}")
+    print(f"📅 Status Hari Ini:{status_today}")
     print(f"👥 Mode Penerima  : {mode_label}")
     print(f"⏰ Jadwal Auto    : {sched_badge}")
     print("==================================================================")
+
+    if not is_logged_in:
+        print("\n" + "╔" + "═" * 64 + "╗")
+        print("║  ⚠️  STATUS AKUN: BELUM LOGIN / SESI KOSONG                    ║")
+        print("║  👉 Anda belum menghubungkan akun Snapchat. Otomasi streak    ║")
+        print("║     tidak dapat berjalan sebelum Anda login terlebih dahulu.   ║")
+        print("║                                                                ║")
+        print("║  👉 Silakan pilih menu [🔑 LOGIN SEKARANG] di bawah ini!       ║")
+        print("╚" + "═" * 64 + "╝\n")
 
 
 def menu_manage_recipients():
@@ -1444,18 +1515,32 @@ def menu_view_logs():
 def interactive_hub():
     while True:
         print_dashboard()
+        is_logged_in = check_login_status()
 
-        choices = [
-            Choice("🚀 Kirim Streak Sekarang (Run Snap Check-in)", value="run"),
-            Choice("👥 Kelola Penerima & Caption (Penerima, Grup & Template)", value="recipients"),
-            Choice("⏰ Jadwal Otomatis Harian (LaunchAgent @ 09:00 + Wake-up Catch-up)", value="scheduler"),
-            Choice("📜 Riwayat Aktivitas & Log (Tersimpan 3 Hari)", value="logs"),
-            Choice("🔑 Akun & Pindai Kontak (Login & Scan Teman Snapchat)", value="account"),
-            Choice("🔔 Pengaturan Notifikasi (Telegram / Discord)", value="notifications"),
-            Choice("🔄 Cek Pembaruan Aplikasi (Check for Updates)", value="check_update"),
-            Separator(),
-            Choice("🚪 Keluar", value="exit")
-        ]
+        if not is_logged_in:
+            choices = [
+                Choice("🔑 [WAJIB] LOGIN / HUBUNGKAN AKUN SEKARANG (Buka Browser)", value="login"),
+                Choice("🚀 Kirim Streak Sekarang (Perlu Login Terlebih Dahulu)", value="run"),
+                Choice("👥 Kelola Penerima & Caption (Penerima, Grup & Template)", value="recipients"),
+                Choice("⏰ Jadwal Otomatis Harian (LaunchAgent @ 09:00 + Wake-up Catch-up)", value="scheduler"),
+                Choice("📜 Riwayat Aktivitas & Log (Tersimpan 3 Hari)", value="logs"),
+                Choice("🔔 Pengaturan Notifikasi (Telegram / Discord)", value="notifications"),
+                Choice("🔄 Cek Pembaruan Aplikasi (Check for Updates)", value="check_update"),
+                Separator(),
+                Choice("🚪 Keluar", value="exit")
+            ]
+        else:
+            choices = [
+                Choice("🚀 Kirim Streak Sekarang (Run Snap Check-in)", value="run"),
+                Choice("👥 Kelola Penerima & Caption (Penerima, Grup & Template)", value="recipients"),
+                Choice("⏰ Jadwal Otomatis Harian (LaunchAgent @ 09:00 + Wake-up Catch-up)", value="scheduler"),
+                Choice("📜 Riwayat Aktivitas & Log (Tersimpan 3 Hari)", value="logs"),
+                Choice("🔑 Akun & Pindai Kontak (Login & Scan Teman Snapchat)", value="account"),
+                Choice("🔔 Pengaturan Notifikasi (Telegram / Discord)", value="notifications"),
+                Choice("🔄 Cek Pembaruan Aplikasi (Check for Updates)", value="check_update"),
+                Separator(),
+                Choice("🚪 Keluar", value="exit")
+            ]
 
         action = questionary.select(
             "Pilih Menu:",
@@ -1467,9 +1552,19 @@ def interactive_hub():
             print("\n👋 Sampai jumpa! Snap streak Anda aman.\n")
             break
 
-        elif action == "run":
-            run_send_streak(force=True, verbose=True)
+        elif action == "login":
+            interactive_login()
             questionary.press_any_key_to_continue().ask()
+
+        elif action == "run":
+            if not check_login_status():
+                print("\n[!] Anda belum login ke akun Snapchat.")
+                do_login = questionary.confirm("Buka jendela browser untuk login sekarang?", default=True).ask()
+                if do_login:
+                    interactive_login()
+            else:
+                run_send_streak(force=True, verbose=True)
+                questionary.press_any_key_to_continue().ask()
 
         elif action == "recipients":
             menu_manage_recipients()
@@ -1488,7 +1583,6 @@ def interactive_hub():
 
         elif action == "check_update":
             check_for_updates(prompt_if_latest=True)
-
 
 # ==============================================================================
 # CLI Entry Point & Background Worker
