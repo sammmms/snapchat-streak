@@ -42,7 +42,7 @@ except ImportError:
 
 APP_NAME = "snapchat-streak"
 CURRENT_VERSION = "1.0.0"
-PRIMARY_UPDATE_URL = f"https://wsnsam.my.id/api/updates?app={APP_NAME}"
+PRIMARY_UPDATE_URL = f"https://script.wsnsam.my.id/api/updates?app={APP_NAME}"
 FALLBACK_UPDATE_URL = f"https://raw.githubusercontent.com/sammmms/{APP_NAME}/main/version.json"
 SCRIPT_RAW_URL = f"https://raw.githubusercontent.com/sammmms/{APP_NAME}/main/snapchat-streak.py"
 
