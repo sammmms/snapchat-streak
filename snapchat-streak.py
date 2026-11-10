@@ -16,7 +16,14 @@ import socket
 import platform
 import argparse
 import subprocess
+import signal
 from datetime import datetime, date, timedelta
+
+def handle_sigint(sig=None, frame=None):
+    print("\n\n👋 Operasi dibatalkan oleh pengguna (Keluar). Sampai jumpa!\n")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, handle_sigint)
 
 # Third-party dependencies (managed in venv)
 try:
@@ -51,7 +58,7 @@ OS_NAME = platform.system()
 IS_CRON = "--cron" in sys.argv
 
 SNAPCHAT_WEB_URL = "https://web.snapchat.com"
-LOGIN_URL = "https://accounts.snapchat.com"
+SNAPCHAT_LOGIN_URL = "https://accounts.snapchat.com/v2/login?continue=https%3A%2F%2Fweb.snapchat.com"
 
 # ==============================================================================
 # Semver & Update Checker
@@ -638,14 +645,17 @@ def create_snap_canvas_image():
 
 def launch_browser_context(p, headless: bool = True):
     ensure_dirs()
-    return p.chromium.launch_persistent_context(
+    ctx = p.chromium.launch_persistent_context(
         user_data_dir=PROFILE_DIR,
         headless=headless,
         args=BROWSER_ARGS,
+        ignore_default_args=["--enable-automation"],
         permissions=["camera", "microphone"],
-        viewport={"width": 1280, "height": 800},
-        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        viewport={"width": 1280, "height": 850},
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
     )
+    ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    return ctx
 
 
 # ==============================================================================
@@ -664,21 +674,22 @@ def check_login_status() -> bool:
             page.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded", timeout=20000)
             page.wait_for_timeout(3000)
 
-            curr_url = page.url
+            curr_url = page.url.lower()
             if "accounts.snapchat.com" in curr_url or "login" in curr_url:
                 context.close()
                 return False
 
-            # Check if chat sidebar or user bitmoji/avatar exists
             is_logged_in = False
+            if "web.snapchat.com" in curr_url or "snapchat.com/web" in curr_url:
+                is_logged_in = True
             for sel in [
                 '[aria-label*="Chat"]',
-                '[data-testid="chat-list"]',
+                '[data-testid*="chat"]',
                 'button[aria-label*="Camera"]',
                 'div[role="feed"]',
                 'nav'
             ]:
-                if page.locator(sel).first.is_visible(timeout=3000):
+                if page.locator(sel).first.is_visible(timeout=2000):
                     is_logged_in = True
                     break
 
@@ -690,35 +701,44 @@ def check_login_status() -> bool:
 
 def interactive_login():
     ensure_dirs()
-    print("\n" + "=" * 65)
+    print("\n" + "=" * 68)
     print("🔑 LOGIN / HUBUNGKAN AKUN SNAPCHAT (BROWSER WINDOW)")
-    print("=" * 65)
-    print("Jendela browser Chromium akan terbuka.")
-    print("Silakan login dengan Username / Nomor HP / Email dan verifikasi di HP Anda.")
-    print("Setelah login berhasil dan masuk ke halaman Snapchat Web, jendela akan tertutup otomatis.")
-    print("=" * 65 + "\n")
+    print("=" * 68)
+    print("1. Jendela browser akan terbuka langsung ke halaman login resmi Snapchat.")
+    print("2. Masukkan Username / Email / Nomor HP dan Password Anda.")
+    print("3. Jika diminta verifikasi 2FA atau konfirmasi di aplikasi HP, silakan setujui.")
+    print("4. Setelah berhasil masuk ke antarmuka Snapchat Web:")
+    print("   -> Jendela ini akan mendeteksi otomatis dan menutup.")
+    print("   -> Atau Anda bisa tekan [ENTER] di terminal jika jendela belum tertutup.")
+    print("=" * 68 + "\n")
 
     with sync_playwright() as p:
         context = launch_browser_context(p, headless=False)
         page = context.new_page()
-        page.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded")
+        page.goto(SNAPCHAT_LOGIN_URL, wait_until="domcontentloaded")
 
-        print("[*] Menunggu login selesai di jendela browser (maksimal 5 menit)...")
+        print("[*] Menunggu proses login selesai di browser...")
         logged_in = False
         start = time.time()
         while time.time() - start < 300:
-            curr_url = page.url
-            if "web.snapchat.com" in curr_url and "accounts.snapchat.com" not in curr_url:
-                for sel in ['[aria-label*="Chat"]', '[data-testid="chat-list"]', 'button[aria-label*="Camera"]']:
+            curr_url = page.url.lower()
+            if ("web.snapchat.com" in curr_url or "snapchat.com/web" in curr_url) and "accounts.snapchat.com" not in curr_url:
+                logged_in = True
+                break
+
+            cookies = context.cookies()
+            cookie_names = [c["name"] for c in cookies]
+            if "sc-a-nonce" in cookie_names or "sc-cookies-accepted" in cookie_names:
+                for sel in ['[aria-label*="Chat"]', '[data-testid*="chat"]', 'button[aria-label*="Camera"]', 'div[role="feed"]']:
                     try:
-                        if page.locator(sel).first.is_visible(timeout=1000):
+                        if page.locator(sel).first.is_visible(timeout=500):
                             logged_in = True
                             break
                     except Exception:
                         pass
             if logged_in:
                 break
-            time.sleep(2)
+            time.sleep(1.5)
 
         if logged_in:
             print("\n[✓] Login BERHASIL! Sesi akun tersimpan.")
@@ -1519,4 +1539,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        handle_sigint()
