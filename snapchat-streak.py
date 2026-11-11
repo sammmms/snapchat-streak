@@ -696,15 +696,21 @@ def create_snap_canvas_image():
 
 def launch_browser_context(p, headless: bool = True):
     ensure_dirs()
-    ctx = p.chromium.launch_persistent_context(
-        user_data_dir=PROFILE_DIR,
-        headless=headless,
-        args=BROWSER_ARGS,
-        ignore_default_args=["--enable-automation"],
-        permissions=["camera", "microphone"],
-        viewport={"width": 1280, "height": 850},
-        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-    )
+    opts = {
+        "user_data_dir": PROFILE_DIR,
+        "headless": headless,
+        "args": BROWSER_ARGS,
+        "ignore_default_args": ["--enable-automation"],
+        "permissions": ["camera", "microphone"],
+        "viewport": {"width": 1280, "height": 850},
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    }
+    try:
+        ctx = p.chromium.launch_persistent_context(**opts)
+    except Exception as e:
+        log_activity("SYSTEM", f"Chromium default launch gagal ({e}). Fallback ke Google Chrome lokal...")
+        opts["channel"] = "chrome"
+        ctx = p.chromium.launch_persistent_context(**opts)
     ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return ctx
 
