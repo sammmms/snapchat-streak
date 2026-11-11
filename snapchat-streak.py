@@ -701,23 +701,36 @@ def launch_browser_context(p, headless: bool = True):
     2. Local Google Chrome (channel='chrome')
     3. Local Microsoft Edge (channel='msedge')
     4. Auto-repair (auto-installs missing Chromium binary via CLI and retries)
+    Includes stealth anti-detection so Snapchat Web never flags 'Browser not supported'.
     """
     ensure_dirs()
+    args = list(BROWSER_ARGS)
+    if headless:
+        args.append("--headless=new")
+
     opts = {
         "user_data_dir": PROFILE_DIR,
         "headless": headless,
-        "args": BROWSER_ARGS,
+        "args": args,
         "ignore_default_args": ["--enable-automation"],
         "permissions": ["camera", "microphone"],
-        "viewport": {"width": 1280, "height": 850},
+        "viewport": {"width": 1440, "height": 900},
         "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
     }
+
+    def setup_context(ctx):
+        ctx.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.navigator.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        """)
+        return ctx
 
     # Tier 1: Default Playwright Chromium
     try:
         ctx = p.chromium.launch_persistent_context(**opts)
-        ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        return ctx
+        return setup_context(ctx)
     except Exception as e1:
         log_activity("SYSTEM", f"Chromium default launch gagal ({e1}). Mencoba fallback ke Google Chrome lokal...")
 
@@ -726,8 +739,7 @@ def launch_browser_context(p, headless: bool = True):
         opts_chrome = dict(opts)
         opts_chrome["channel"] = "chrome"
         ctx = p.chromium.launch_persistent_context(**opts_chrome)
-        ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        return ctx
+        return setup_context(ctx)
     except Exception as e2:
         log_activity("SYSTEM", f"Google Chrome lokal gagal ({e2}). Mencoba fallback ke Microsoft Edge...")
 
@@ -736,8 +748,7 @@ def launch_browser_context(p, headless: bool = True):
         opts_edge = dict(opts)
         opts_edge["channel"] = "msedge"
         ctx = p.chromium.launch_persistent_context(**opts_edge)
-        ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        return ctx
+        return setup_context(ctx)
     except Exception:
         pass
 
@@ -752,8 +763,7 @@ def launch_browser_context(p, headless: bool = True):
             check=False
         )
         ctx = p.chromium.launch_persistent_context(**opts)
-        ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        return ctx
+        return setup_context(ctx)
     except Exception as e_final:
         raise RuntimeError(f"Gagal meluncurkan browser Playwright setelah 4 metode pemulihan dicoba: {e_final}")
 
@@ -762,8 +772,37 @@ def launch_browser_context(p, headless: bool = True):
 # Login & Authentication Verification
 # ==============================================================================
 
+def is_page_logged_in(page) -> bool:
+    """Verifies whether the current page is authenticated on Snapchat Web."""
+    try:
+        url = page.url.lower()
+        if "accounts.snapchat.com" in url or "original_referrer" in url:
+            return False
+
+        # If password or identifier input is visible, user is definitely not logged in
+        for sel in ['input[type="password"]', 'input[name="accountIdentifier"]', 'button:has-text("Log in")', 'button:has-text("Log In")']:
+            if page.locator(sel).first.is_visible(timeout=300):
+                return False
+
+        body_text = page.locator("body").inner_text().lower()
+        if "log in to snapchat" in body_text or "browser not supported" in body_text:
+            return False
+
+        # If chat feed or conversation list or camera button is visible
+        for chat_sel in ['[role="feed"]', '[data-testid*="chat"]', '[aria-label*="Chat"]', 'div[class*="chat"]', 'button[aria-label*="Camera"]', '[role="listitem"]']:
+            if page.locator(chat_sel).first.is_visible(timeout=400):
+                return True
+
+        if "web.snapchat.com" in url:
+            return True
+
+        return False
+    except Exception:
+        return False
+
+
 def check_login_status() -> bool:
-    """Instant (1ms) filesystem check for active Snapchat login session without launching heavy browser."""
+    """Instant (1ms) filesystem check for authentic Snapchat login session."""
     if not os.path.exists(PROFILE_DIR):
         return False
     cookie_paths = [
@@ -777,14 +816,22 @@ def check_login_status() -> bool:
                 import sqlite3
                 conn = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
                 cur = conn.cursor()
-                cur.execute("SELECT count(*) FROM cookies WHERE host_key LIKE '%snapchat%'")
+                cur.execute("""
+                    SELECT count(*) FROM cookies 
+                    WHERE host_key LIKE '%snapchat%' 
+                    AND (
+                        name LIKE 'sc-a-%' 
+                        OR (name LIKE '%session%' AND name NOT LIKE '%blizzard%') 
+                        OR name LIKE '%auth%' 
+                        OR name LIKE '%token%'
+                    )
+                """)
                 count = cur.fetchone()[0]
                 conn.close()
-                if count >= 3:
+                if count >= 1:
                     return True
             except Exception:
-                if os.path.getsize(p) > 20480:
-                    return True
+                pass
     return False
 
 
@@ -794,9 +841,9 @@ def verify_login_live(verbose: bool = True) -> bool:
         with sync_playwright() as p:
             ctx = launch_browser_context(p, headless=True)
             pg = ctx.new_page()
-            pg.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded", timeout=15000)
+            pg.goto(SNAPCHAT_WEB_URL, wait_until="networkidle", timeout=25000)
             pg.wait_for_timeout(2500)
-            is_valid = ("web.snapchat.com" in pg.url or "snapchat.com/web" in pg.url) and "accounts.snapchat.com" not in pg.url
+            is_valid = is_page_logged_in(pg)
             ctx.close()
             return is_valid
 
@@ -813,50 +860,50 @@ def verify_login_live(verbose: bool = True) -> bool:
 def interactive_login():
     ensure_dirs()
     print("\n" + "=" * 68)
-    print("🔑 LOGIN / HUBUNGKAN AKUN SNAPCHAT (BROWSER WINDOW)")
+    print("🔑 LOGIN / HUBUNGKAN AKUN SNAPCHAT (BROWSER RESMI)")
     print("=" * 68)
-    print("1. Jendela browser akan terbuka langsung ke halaman login resmi Snapchat.")
+    print("1. Jendela browser resmi akan terbuka langsung ke Snapchat Web.")
     print("2. Masukkan Username / Email / Nomor HP dan Password Anda.")
     print("3. Jika diminta verifikasi 2FA atau konfirmasi di aplikasi HP, silakan setujui.")
-    print("4. Setelah berhasil masuk ke antarmuka Snapchat Web:")
-    print("   -> Jendela ini akan mendeteksi otomatis dan menutup.")
-    print("   -> Atau Anda bisa tekan [ENTER] di terminal jika jendela belum tertutup.")
+    print("4. Setelah berhasil masuk ke antarmuka chat Snapchat:")
+    print("   👉 KEMBALI KE TERMINAL INI dan tekan [ENTER] untuk menyimpan sesi!")
     print("=" * 68 + "\n")
+
+    input("Tekan [ENTER] untuk membuka jendela browser login...")
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[!] Modul 'playwright' belum terpasang.")
+        return
 
     with sync_playwright() as p:
         context = launch_browser_context(p, headless=False)
-        page = context.new_page()
-        page.goto(SNAPCHAT_LOGIN_URL, wait_until="domcontentloaded")
+        page = context.pages[0] if context.pages else context.new_page()
+        page.goto("https://web.snapchat.com", wait_until="networkidle", timeout=60000)
 
-        print("[*] Menunggu proses login selesai di browser...")
-        logged_in = False
-        start = time.time()
-        while time.time() - start < 300:
-            curr_url = page.url.lower()
-            if ("web.snapchat.com" in curr_url or "snapchat.com/web" in curr_url) and "accounts.snapchat.com" not in curr_url:
-                logged_in = True
-                break
+        print("\n[*] Jendela browser telah terbuka.")
+        print("[*] Silakan login akun Snapchat Anda di browser tersebut.")
+        input("\n👉 Jika Anda SUDAH SELESAI LOGIN di browser, tekan [ENTER] di terminal ini...")
 
-            cookies = context.cookies()
-            cookie_names = [c["name"] for c in cookies]
-            if "sc-a-nonce" in cookie_names or "sc-cookies-accepted" in cookie_names:
-                for sel in ['[aria-label*="Chat"]', '[data-testid*="chat"]', 'button[aria-label*="Camera"]', 'div[role="feed"]']:
-                    try:
-                        if page.locator(sel).first.is_visible(timeout=500):
-                            logged_in = True
-                            break
-                    except Exception:
-                        pass
-            if logged_in:
-                break
-            time.sleep(1.5)
-
-        if logged_in:
-            print("\n[✓] Login BERHASIL! Sesi akun tersimpan.")
-            log_activity("AUTH", "Login Snapchat berhasil dilakukan via interactive browser.")
+        time.sleep(1)
+        if is_page_logged_in(page):
+            print("\n[✓] Login BERHASIL dan TERVERIFIKASI! Sesi akun tersimpan di komputer.")
+            log_activity("AUTH", "Login Snapchat berhasil diverifikasi via interactive browser.")
             scan_snapchat_friends_using_page(page, verbose=True)
         else:
-            print("\n[!] Waktu login habis atau jendela ditutup sebelum login selesai.")
+            cookies = context.cookies()
+            has_auth = any(
+                ("sc-a-" in c["name"] or ("session" in c["name"].lower() and "blizzard" not in c["name"].lower()) or "auth" in c["name"].lower())
+                for c in cookies if "snapchat" in c.get("domain", "")
+            )
+            if has_auth:
+                print("\n[✓] Login BERHASIL! Sesi akun tersimpan di komputer.")
+                log_activity("AUTH", "Login Snapchat tersimpan via cookies.")
+                scan_snapchat_friends_using_page(page, verbose=True)
+            else:
+                print("\n[!] Perhatian: Belum terdeteksi status login pada browser.")
+                print("    Jika Anda belum selesai login, silakan ulangi menu Login ini.")
 
         context.close()
 
@@ -876,23 +923,44 @@ def scan_snapchat_friends_using_page(page, verbose: bool = True) -> list:
     page.wait_for_timeout(3000)
 
     # Scroll conversation feed to load all items
-    feed_locators = ['div[role="feed"]', '[data-testid="chat-list"]', 'ul', 'div[class*="chats"]']
+    feed_locators = ['div[role="feed"]', '[data-testid="chat-list"]', 'nav', 'ul', 'div[class*="chats"]', 'div[class*="conversation"]']
     for feed_sel in feed_locators:
         try:
             feed = page.locator(feed_sel).first
             if feed.is_visible():
-                for _ in range(3):
+                for _ in range(5):
                     feed.evaluate("el => el.scrollTop += 600")
-                    page.wait_for_timeout(1000)
+                    page.wait_for_timeout(600)
                 break
         except Exception:
             pass
 
     # Extract conversation items
-    items = page.locator('[role="listitem"], [data-testid*="chat-item"], div[class*="chat-item"]').all()
+    item_selectors = [
+        '[role="feed"] [role="listitem"]',
+        '[role="listitem"]',
+        '[data-testid*="chat-item"]',
+        '[data-testid*="conversation"]',
+        'div[class*="chat-item"]',
+        'div[class*="ConversationItem"]',
+        'div[class*="chatListItem"]',
+        'li[role="listitem"]'
+    ]
+    items = []
+    for sel in item_selectors:
+        matched = page.locator(sel).all()
+        if len(matched) > len(items):
+            items = matched
+
     if not items:
-        # Fallback to general clickable contact rows
-        items = page.locator('button[class*="chat"], div[role="button"]').all()
+        items = page.locator('button[class*="chat"], div[role="button"]:has(span)').all()
+
+    ignore_names = {
+        "chat", "new chat", "camera", "search", "stories", "spotlight", 
+        "settings", "snapchat", "my story", "add friends", "log in", 
+        "sign up", "terms", "privacy", "download", "lenses", "snapchat+",
+        "browser not supported"
+    }
 
     for item in items:
         try:
@@ -903,13 +971,13 @@ def scan_snapchat_friends_using_page(page, verbose: bool = True) -> list:
             if not lines:
                 continue
             name = lines[0]
-            if name in ["Chat", "New Chat", "Camera", "Search", "Stories", "Spotlight", "Settings"]:
+            if name.lower() in ignore_names or len(name) > 35:
                 continue
 
             has_streak = "🔥" in text or "streak" in text.lower()
             streak_badge = " 🔥" if has_streak else ""
 
-            if name not in found_contacts and len(name) < 40:
+            if name not in found_contacts:
                 found_contacts.append(name)
                 if verbose:
                     print(f"  • {name}{streak_badge}")
@@ -922,25 +990,33 @@ def scan_snapchat_friends_using_page(page, verbose: bool = True) -> list:
         save_config(cfg)
         log_activity("JOB", f"Pindai kontak selesai: ditemukan {len(found_contacts)} teman.")
         if verbose:
-            print(f"[✓] Berhasil menyimpan {len(merged)} teman ke daftar kontak.\n")
+            print(f"\n[✓] Berhasil menyimpan {len(merged)} teman ke daftar kontak.\n")
     else:
         if verbose:
-            print("[-] Tidak ada teman baru yang terdeteksi secara otomatis.")
+            print("[-] Tidak ada percakapan teman yang terdeteksi secara otomatis.")
+            print("    Pastikan Anda sudah login dan membuka tab Chat di Snapchat Web.")
 
     return found_contacts
 
 
 def scan_snapchat_friends(verbose: bool = True) -> list:
+    if not check_login_status():
+        if verbose:
+            print("\n[!] Akun Snapchat Anda belum terhubung (Sesi Kosong).")
+            print("    👉 Silakan pilih menu [🔑 Login / Hubungkan Akun] terlebih dahulu untuk login.")
+        return []
+
     with sync_playwright() as p:
         try:
             context = launch_browser_context(p, headless=True)
             page = context.new_page()
-            page.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded", timeout=25000)
+            page.goto(SNAPCHAT_WEB_URL, wait_until="networkidle", timeout=30000)
             page.wait_for_timeout(3000)
 
-            if "accounts.snapchat.com" in page.url or "login" in page.url:
+            if not is_page_logged_in(page):
                 if verbose:
-                    print("[!] Anda belum login ke Snapchat. Silakan login terlebih dahulu di Menu [5].")
+                    print("\n[!] Sesi akun Snapchat kedaluwarsa atau belum login.")
+                    print("    👉 Silakan pilih menu [🔑 Login / Hubungkan Akun] untuk login ulang.")
                 context.close()
                 return []
 
@@ -1123,8 +1199,8 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
             page.wait_for_timeout(3000)
 
             # Check if login active
-            if "accounts.snapchat.com" in page.url or "login" in page.url:
-                err_msg = "Sesi login Snapchat kedaluwarsa. Silakan login ulang via menu terminal."
+            if not is_page_logged_in(page):
+                err_msg = "Sesi login Snapchat kedaluwarsa atau belum login. Silakan login via menu terminal."
                 log_activity("JOB", err_msg)
                 save_state(False, 0, len(target_recipients), err_msg)
                 send_notification("Snapchat Streak Gagal", err_msg, success=False)
@@ -1446,6 +1522,14 @@ def menu_account():
             break
 
         elif action == "scan":
+            if not check_login_status():
+                print("\n[!] Akun Snapchat Anda belum terhubung (Sesi Kosong / Belum Login).")
+                do_login = questionary.confirm("Buka jendela browser untuk login sekarang?", default=True).ask()
+                if do_login:
+                    interactive_login()
+                else:
+                    questionary.press_any_key_to_continue().ask()
+                    continue
             scan_snapchat_friends(verbose=True)
             questionary.press_any_key_to_continue().ask()
 
