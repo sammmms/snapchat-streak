@@ -862,11 +862,12 @@ def interactive_login():
     print("\n" + "=" * 68)
     print("🔑 LOGIN / HUBUNGKAN AKUN SNAPCHAT (BROWSER RESMI)")
     print("=" * 68)
-    print("1. Jendela browser resmi akan terbuka langsung ke Snapchat Web.")
+    print("1. Jendela browser resmi akan terbuka langsung ke halaman login Snapchat.")
     print("2. Masukkan Username / Email / Nomor HP dan Password Anda.")
-    print("3. Jika diminta verifikasi 2FA atau konfirmasi di aplikasi HP, silakan setujui.")
-    print("4. Setelah berhasil masuk ke antarmuka chat Snapchat:")
-    print("   👉 KEMBALI KE TERMINAL INI dan tekan [ENTER] untuk menyimpan sesi!")
+    print("3. Jika diminta verifikasi 2FA atau notifikasi di aplikasi HP, silakan setujui.")
+    print("4. Pastikan browser selesai memuat dan menampilkan halaman Chat Snapchat Web.")
+    print("5. KEMBALI KE TERMINAL INI dan tekan [ENTER].")
+    print("   👉 JANGAN tutup browser secara manual! Script akan menutupnya otomatis.")
     print("=" * 68 + "\n")
 
     input("Tekan [ENTER] untuk membuka jendela browser login...")
@@ -877,35 +878,60 @@ def interactive_login():
         print("[!] Modul 'playwright' belum terpasang.")
         return
 
+    login_confirmed = False
+
     with sync_playwright() as p:
         context = launch_browser_context(p, headless=False)
         page = context.pages[0] if context.pages else context.new_page()
-        page.goto("https://web.snapchat.com", wait_until="networkidle", timeout=60000)
+        try:
+            page.goto("https://accounts.snapchat.com/v2/login?continue=https%3A%2F%2Fweb.snapchat.com", wait_until="networkidle", timeout=60000)
+        except Exception:
+            pass
 
         print("\n[*] Jendela browser telah terbuka.")
         print("[*] Silakan login akun Snapchat Anda di browser tersebut.")
-        input("\n👉 Jika Anda SUDAH SELESAI LOGIN di browser, tekan [ENTER] di terminal ini...")
+        input("\n👉 Setelah Anda SUDAH SELESAI LOGIN dan melihat halaman obrolan/Chat di browser, tekan [ENTER] di sini...\n   (Browser akan ditutup otomatis oleh script, jangan ditutup manual)")
 
-        time.sleep(1)
-        if is_page_logged_in(page):
-            print("\n[✓] Login BERHASIL dan TERVERIFIKASI! Sesi akun tersimpan di komputer.")
-            log_activity("AUTH", "Login Snapchat berhasil diverifikasi via interactive browser.")
-            scan_snapchat_friends_using_page(page, verbose=True)
-        else:
+        # Safely verify login while browser is still open
+        try:
+            if not page.is_closed():
+                time.sleep(1)
+                if is_page_logged_in(page):
+                    login_confirmed = True
+        except Exception:
+            pass
+
+        # Safely inspect cookies
+        try:
             cookies = context.cookies()
             has_auth = any(
-                ("sc-a-" in c["name"] or ("session" in c["name"].lower() and "blizzard" not in c["name"].lower()) or "auth" in c["name"].lower())
+                ("sc-a-" in c["name"] or ("session" in c["name"].lower() and "blizzard" not in c["name"].lower()) or "auth" in c["name"].lower() or "sastate" in c["name"].lower())
                 for c in cookies if "snapchat" in c.get("domain", "")
             )
             if has_auth:
-                print("\n[✓] Login BERHASIL! Sesi akun tersimpan di komputer.")
-                log_activity("AUTH", "Login Snapchat tersimpan via cookies.")
-                scan_snapchat_friends_using_page(page, verbose=True)
-            else:
-                print("\n[!] Perhatian: Belum terdeteksi status login pada browser.")
-                print("    Jika Anda belum selesai login, silakan ulangi menu Login ini.")
+                login_confirmed = True
+        except Exception:
+            pass
 
-        context.close()
+        # Cleanly close browser without crashing if user already closed it
+        try:
+            context.close()
+        except Exception:
+            pass
+
+    # Filesystem check as final fallback
+    if not login_confirmed:
+        login_confirmed = check_login_status()
+
+    if login_confirmed:
+        print("\n[✓] Login BERHASIL! Sesi akun tersimpan rapi di komputer.")
+        log_activity("AUTH", "Login Snapchat berhasil disimpan dan terverifikasi.")
+        print("[*] Memulai pemindaian daftar teman dari akun yang terhubung...")
+        scan_snapchat_friends(verbose=True)
+    else:
+        print("\n[!] Perhatian: Belum terdeteksi sesi login aktif.")
+        print("    Pastikan Anda sudah menyelesaikan proses login sampai halaman Chat sebelum menekan [ENTER].")
+        print("    Silakan coba lagi dari menu Login.")
 
 
 # ==============================================================================
