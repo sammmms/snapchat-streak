@@ -1177,110 +1177,116 @@ def scan_snapchat_friends(verbose: bool = True) -> list:
 # ==============================================================================
 
 def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") -> tuple:
-    """Takes a snap using camera shutter and dispatches to recipient_names. Returns (sent: list, failed: list)."""
+    """Takes a snap using camera shutter and dispatches to recipients. Returns (sent: list, failed: list)."""
     sent = []
     failed = []
 
     try:
-        # Step 1: Open Camera Interface
-        camera_clicked = False
-        for cam_btn in [
-            'button[aria-label*="Camera"]',
-            'button[aria-label*="Take Snap"]',
-            '[data-testid*="camera"]',
-            'div[aria-label*="Camera"]'
-        ]:
-            loc = page.locator(cam_btn).first
-            if loc.is_visible(timeout=1500):
-                loc.click()
-                camera_clicked = True
-                break
+        # Step 1: Ensure camera interface is open and active
+        shutter = page.locator("button.fE2D5, button.gK0xL, button[class*='fE2D5'], button[class*='gK0xL']").first
+        if not shutter.is_visible(timeout=2000):
+            # Click the camera button to open camera feed
+            cam_btn = page.locator("button.qJKfS, div.Jq_5_ button, button:has-text('Click the Camera')").first
+            if cam_btn.is_visible(timeout=2000):
+                cam_btn.click()
+                page.wait_for_timeout(2500)
+            
+            # Re-locate shutter
+            shutter = page.locator("button.fE2D5, button.gK0xL, button[class*='fE2D5'], button[class*='gK0xL']").first
 
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(1500)
 
         # Step 2: Click Shutter to take Snap
-        shutter_clicked = False
-        for shutter_sel in [
-            'button[aria-label*="Capture"]',
-            'button[aria-label*="Take Snap"]',
-            'button[class*="shutter"]',
-            'button[class*="capture"]',
-            'button[class*="circle"]'
-        ]:
-            shutter = page.locator(shutter_sel).first
-            if shutter.is_visible(timeout=1500):
-                shutter.click()
-                shutter_clicked = True
-                break
-
-        if not shutter_clicked:
-            # Fallback: Click center bottom of viewport
-            vp = page.viewport_size or {"width": 1280, "height": 800}
-            page.mouse.click(vp["width"] / 2, vp["height"] - 90)
-            shutter_clicked = True
+        if shutter.is_visible(timeout=3000):
+            shutter.click()
+        else:
+            # Fallback coordinate click on center camera card
+            page.mouse.click(724, 755)
 
         page.wait_for_timeout(2500)
 
         # Step 3: Add Caption (if provided)
         if caption_text:
             try:
-                caption_input = page.locator('textarea, input[placeholder*="caption"], [contenteditable="true"]').first
-                if caption_input.is_visible(timeout=1000):
-                    caption_input.fill(caption_text)
+                cap_btn = page.locator("button[title='Add a caption'], button.xHw7V:has-text('T'), button:has-text('T')").first
+                if cap_btn.is_visible(timeout=1500):
+                    cap_btn.click()
+                    page.wait_for_timeout(600)
+                    page.keyboard.type(caption_text)
                     page.keyboard.press("Enter")
-            except Exception:
-                pass
+                    page.wait_for_timeout(600)
+            except Exception as e:
+                log_activity("DEBUG", f"Caption add skipped/failed: {e}")
 
-        # Step 4: Click 'Send To' / Next Button
-        send_to_btn = None
-        for st_sel in [
-            'button[aria-label*="Send To"]',
-            'button[aria-label*="Next"]',
-            'button[class*="send"]',
-            'button:has(svg)'
-        ]:
-            candidate = page.locator(st_sel).first
-            if candidate.is_visible(timeout=1500):
-                send_to_btn = candidate
-                send_to_btn.click()
-                break
+        # Step 4: Click 'Send To' button
+        send_to_btn = page.locator("button:has-text('Send To'), button.fGS78").first
+        if not send_to_btn.is_visible(timeout=3000):
+            # Maybe camera preview didn't advance, retry shutter click
+            if shutter.is_visible(timeout=1000):
+                shutter.click()
+                page.wait_for_timeout(2500)
+            send_to_btn = page.locator("button:has-text('Send To'), button.fGS78").first
 
-        page.wait_for_timeout(2000)
-
-        # Step 5: Select each target recipient in friend picker
-        for target in recipient_names:
-            try:
-                # Search contact
-                search_box = page.locator('input[placeholder*="Search"], input[type="search"]').first
-                if search_box.is_visible(timeout=1500):
-                    search_box.fill(target)
-                    page.wait_for_timeout(1000)
-
-                # Click contact checkbox or row
-                friend_row = page.locator(f'text="{target}"').first
-                if friend_row.is_visible(timeout=2000):
-                    friend_row.click()
-                    sent.append(target)
-                    time.sleep(get_action_delay())
-                else:
-                    failed.append(target)
-            except Exception:
-                failed.append(target)
-
-        # Step 6: Click Final Blue Send Button
-        final_send = page.locator('button[aria-label*="Send"], button[class*="send-button"]').last
-        if final_send.is_visible(timeout=2000):
-            final_send.click()
-            page.wait_for_timeout(3000)
-            log_activity("JOB", f"Snap terkirim ke {len(sent)} kontak.")
+        if send_to_btn.is_visible(timeout=3000):
+            send_to_btn.click()
+            page.wait_for_timeout(2500)
         else:
-            # Fallback press Enter
-            page.keyboard.press("Enter")
-            page.wait_for_timeout(2000)
+            raise RuntimeError("Tombol 'Send To' tidak ditemukan setelah mengambil foto Snap.")
+
+        # Step 5: Select Recipients in modal
+        # Method A: Use 'Streak' shortcut pill if available
+        selected_via_shortcut = False
+        streak_pill = page.locator("form.tvul8 button:has-text('Streak'), .THeKv button:has-text('Streak'), button:has-text('Streak')").first
+        if streak_pill.is_visible(timeout=2000):
+            streak_pill.click()
+            page.wait_for_timeout(1500)
+            select_btn = page.locator("text='Select', button:has-text('Select')").first
+            if select_btn.is_visible(timeout=2000):
+                select_btn.click()
+                page.wait_for_timeout(1500)
+                selected_via_shortcut = True
+                sent = list(recipient_names)
+
+        # Method B: Search or click individual recipients in modal
+        if not selected_via_shortcut:
+            modal_container = page.locator(".Zoysu, .SZJHC, form.tvul8").first
+            modal_search = modal_container.locator("input").first
+            for target in recipient_names:
+                try:
+                    if modal_search.is_visible(timeout=1000):
+                        modal_search.fill(target)
+                        page.wait_for_timeout(1000)
+                        item_checkbox = modal_container.locator("li, [role='listitem'], div[class*='Ewflr']").first
+                        if item_checkbox.is_visible(timeout=1500):
+                            item_checkbox.click()
+                            sent.append(target)
+                            modal_search.fill("")
+                            page.wait_for_timeout(400)
+                        else:
+                            failed.append(target)
+                    else:
+                        row = modal_container.locator(f"text='{target}'").first
+                        if row.is_visible(timeout=1000):
+                            row.click()
+                            sent.append(target)
+                        else:
+                            failed.append(target)
+                except Exception:
+                    failed.append(target)
+
+        # Step 6: Click Final Send Button
+        # Specifically target button.TYX6O or button with exact text 'Send' (avoid 'Send To')
+        final_send = page.locator("button.TYX6O, button:text-is('Send')").first
+        if final_send.is_visible(timeout=3000):
+            final_send.click(force=True)
+            page.wait_for_timeout(4000)
+            log_activity("JOB", f"Snap berhasil dikirim ke {len(sent)} kontak.")
+        else:
+            raise RuntimeError("Tombol final 'Send' tidak aktif atau tidak ditemukan di antarmuka penerima.")
 
     except Exception as e:
         log_activity("JOB", f"Error saat eksekusi take_and_send_snap: {e}")
-        failed.extend([r for r in recipient_names if r not in sent])
+        failed = [r for r in recipient_names if r not in sent]
 
     return sent, failed
 
