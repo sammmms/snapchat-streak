@@ -695,6 +695,13 @@ def create_snap_canvas_image():
 
 
 def launch_browser_context(p, headless: bool = True):
+    """
+    Launches Playwright persistent context with 4-tier auto-recovery:
+    1. Bundled Playwright Chromium / Headless Shell
+    2. Local Google Chrome (channel='chrome')
+    3. Local Microsoft Edge (channel='msedge')
+    4. Auto-repair (auto-installs missing Chromium binary via CLI and retries)
+    """
     ensure_dirs()
     opts = {
         "user_data_dir": PROFILE_DIR,
@@ -705,14 +712,50 @@ def launch_browser_context(p, headless: bool = True):
         "viewport": {"width": 1280, "height": 850},
         "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
     }
+
+    # Tier 1: Default Playwright Chromium
     try:
         ctx = p.chromium.launch_persistent_context(**opts)
-    except Exception as e:
-        log_activity("SYSTEM", f"Chromium default launch gagal ({e}). Fallback ke Google Chrome lokal...")
-        opts["channel"] = "chrome"
+        ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        return ctx
+    except Exception as e1:
+        log_activity("SYSTEM", f"Chromium default launch gagal ({e1}). Mencoba fallback ke Google Chrome lokal...")
+
+    # Tier 2: Local Google Chrome
+    try:
+        opts_chrome = dict(opts)
+        opts_chrome["channel"] = "chrome"
+        ctx = p.chromium.launch_persistent_context(**opts_chrome)
+        ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        return ctx
+    except Exception as e2:
+        log_activity("SYSTEM", f"Google Chrome lokal gagal ({e2}). Mencoba fallback ke Microsoft Edge...")
+
+    # Tier 3: Local Microsoft Edge
+    try:
+        opts_edge = dict(opts)
+        opts_edge["channel"] = "msedge"
+        ctx = p.chromium.launch_persistent_context(**opts_edge)
+        ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        return ctx
+    except Exception:
+        pass
+
+    # Tier 4: Self-Healing Auto-Repair
+    log_activity("SYSTEM", "Mencoba auto-repair: Mengunduh Playwright Chromium di latar belakang...")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=180,
+            check=False
+        )
         ctx = p.chromium.launch_persistent_context(**opts)
-    ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    return ctx
+        ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        return ctx
+    except Exception as e_final:
+        raise RuntimeError(f"Gagal meluncurkan browser Playwright setelah 4 metode pemulihan dicoba: {e_final}")
 
 
 # ==============================================================================
