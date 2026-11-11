@@ -52,6 +52,7 @@ CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 STATE_FILE = os.path.join(BASE_DIR, "last_run.json")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 PROFILE_DIR = os.path.join(BASE_DIR, "browser_profile")
+STORAGE_STATE_FILE = os.path.join(BASE_DIR, "storage_state.json")
 TEMP_SNAP_IMAGE = os.path.join(BASE_DIR, "temp_snap.png")
 
 OS_NAME = platform.system()
@@ -694,6 +695,52 @@ def create_snap_canvas_image():
         return None
 
 
+def save_auth_session(context) -> bool:
+    """Saves complete authentication session including session cookies and localStorage to storage_state.json."""
+    try:
+        ensure_dirs()
+        context.storage_state(path=STORAGE_STATE_FILE)
+        log_activity("AUTH", "Sesi login berhasil disimpan ke storage_state.json.")
+        return True
+    except Exception as e:
+        log_activity("ERROR", f"Gagal menyimpan session state: {e}")
+        return False
+
+
+def restore_auth_session(context) -> bool:
+    """Restores session cookies and localStorage from storage_state.json into the browser context."""
+    if not os.path.exists(STORAGE_STATE_FILE):
+        return False
+    try:
+        with open(STORAGE_STATE_FILE, "r", encoding="utf-8") as f:
+            state = json.load(f)
+
+        # 1. Restore all cookies (including session cookies)
+        cookies = state.get("cookies", [])
+        if cookies:
+            context.add_cookies(cookies)
+
+        # 2. Restore localStorage per origin
+        for orig in state.get("origins", []):
+            origin_url = orig.get("origin", "")
+            ls_items = orig.get("localStorage", [])
+            if ls_items and origin_url:
+                ls_json = json.dumps({item["name"]: item["value"] for item in ls_items})
+                script = f"""
+                    if (window.location.origin === '{origin_url}') {{
+                        const data = {ls_json};
+                        for (const [k, v] of Object.entries(data)) {{
+                            localStorage.setItem(k, v);
+                        }}
+                    }}
+                """
+                context.add_init_script(script)
+        return True
+    except Exception as e:
+        log_activity("ERROR", f"Gagal memulihkan session state: {e}")
+        return False
+
+
 def launch_browser_context(p, headless: bool = True):
     """
     Launches Playwright persistent context with 4-tier auto-recovery:
@@ -701,7 +748,7 @@ def launch_browser_context(p, headless: bool = True):
     2. Local Google Chrome (channel='chrome')
     3. Local Microsoft Edge (channel='msedge')
     4. Auto-repair (auto-installs missing Chromium binary via CLI and retries)
-    Includes stealth anti-detection so Snapchat Web never flags 'Browser not supported'.
+    Includes stealth anti-detection and automatic session restoration.
     """
     ensure_dirs()
     args = list(BROWSER_ARGS)
@@ -725,6 +772,7 @@ def launch_browser_context(p, headless: bool = True):
             Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
             Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
         """)
+        restore_auth_session(ctx)
         return ctx
 
     # Tier 1: Default Playwright Chromium
@@ -802,7 +850,28 @@ def is_page_logged_in(page) -> bool:
 
 
 def check_login_status() -> bool:
-    """Instant (1ms) filesystem check for authentic Snapchat login session."""
+    """Instant (1ms) check for authentic Snapchat login session via storage_state.json or SQLite database."""
+    # 1. Check storage_state.json first
+    if os.path.exists(STORAGE_STATE_FILE):
+        try:
+            with open(STORAGE_STATE_FILE, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            cookies = state.get("cookies", [])
+            for c in cookies:
+                name = c.get("name", "")
+                domain = c.get("domain", "")
+                if "snapchat" in domain:
+                    if (
+                        name.startswith("sc-a-") 
+                        or ("session" in name.lower() and "blizzard" not in name.lower()) 
+                        or "auth" in name.lower() 
+                        or "sastate" in name.lower()
+                    ):
+                        return True
+        except Exception:
+            pass
+
+    # 2. Check SQLite Cookies database
     if not os.path.exists(PROFILE_DIR):
         return False
     cookie_paths = [
@@ -824,6 +893,7 @@ def check_login_status() -> bool:
                         OR (name LIKE '%session%' AND name NOT LIKE '%blizzard%') 
                         OR name LIKE '%auth%' 
                         OR name LIKE '%token%'
+                        OR name LIKE '%sastate%'
                     )
                 """)
                 count = cur.fetchone()[0]
@@ -862,12 +932,12 @@ def interactive_login():
     print("\n" + "=" * 68)
     print("🔑 LOGIN / HUBUNGKAN AKUN SNAPCHAT (BROWSER RESMI)")
     print("=" * 68)
-    print("1. Jendela browser resmi akan terbuka langsung ke halaman login Snapchat.")
+    print("1. Jendela browser resmi akan terbuka langsung ke Snapchat Web.")
     print("2. Masukkan Username / Email / Nomor HP dan Password Anda.")
     print("3. Jika diminta verifikasi 2FA atau notifikasi di aplikasi HP, silakan setujui.")
-    print("4. Pastikan browser selesai memuat dan menampilkan halaman Chat Snapchat Web.")
+    print("4. Pastikan Anda sudah melihat halaman obrolan / daftar Chat di browser.")
     print("5. KEMBALI KE TERMINAL INI dan tekan [ENTER].")
-    print("   👉 JANGAN tutup browser secara manual! Script akan menutupnya otomatis.")
+    print("   👉 Jendela browser akan ditutup otomatis oleh script (jangan tutup manual).")
     print("=" * 68 + "\n")
 
     input("Tekan [ENTER] untuk membuka jendela browser login...")
@@ -878,30 +948,49 @@ def interactive_login():
         print("[!] Modul 'playwright' belum terpasang.")
         return
 
+    import threading
     login_confirmed = False
 
     with sync_playwright() as p:
         context = launch_browser_context(p, headless=False)
         page = context.pages[0] if context.pages else context.new_page()
         try:
-            page.goto("https://accounts.snapchat.com/v2/login?continue=https%3A%2F%2Fweb.snapchat.com", wait_until="networkidle", timeout=60000)
+            page.goto("https://web.snapchat.com", wait_until="networkidle", timeout=60000)
         except Exception:
             pass
 
         print("\n[*] Jendela browser telah terbuka.")
         print("[*] Silakan login akun Snapchat Anda di browser tersebut.")
-        input("\n👉 Setelah Anda SUDAH SELESAI LOGIN dan melihat halaman obrolan/Chat di browser, tekan [ENTER] di sini...\n   (Browser akan ditutup otomatis oleh script, jangan ditutup manual)")
 
-        # Safely verify login while browser is still open
+        # Background auto-save monitor: automatically captures and saves session
+        # as soon as the user completes login, even before they press ENTER!
+        stop_monitor = False
+        def monitor_worker():
+            while not stop_monitor:
+                try:
+                    if not page.is_closed() and is_page_logged_in(page):
+                        save_auth_session(context)
+                except Exception:
+                    pass
+                time.sleep(1.5)
+
+        mon_thread = threading.Thread(target=monitor_worker, daemon=True)
+        mon_thread.start()
+
+        input("\n👉 Setelah Anda SUDAH SELESAI LOGIN dan melihat halaman obrolan/Chat di browser, tekan [ENTER] di sini...\n   (Browser akan ditutup otomatis oleh script, jangan ditutup manual)")
+        stop_monitor = True
+
+        # Final save while browser is still open
         try:
             if not page.is_closed():
                 time.sleep(1)
+                save_auth_session(context)
                 if is_page_logged_in(page):
                     login_confirmed = True
         except Exception:
             pass
 
-        # Safely inspect cookies
+        # Check cookies before closing
         try:
             cookies = context.cookies()
             has_auth = any(
@@ -909,17 +998,17 @@ def interactive_login():
                 for c in cookies if "snapchat" in c.get("domain", "")
             )
             if has_auth:
+                save_auth_session(context)
                 login_confirmed = True
         except Exception:
             pass
 
-        # Cleanly close browser without crashing if user already closed it
         try:
             context.close()
         except Exception:
             pass
 
-    # Filesystem check as final fallback
+    # Check status
     if not login_confirmed:
         login_confirmed = check_login_status()
 
