@@ -1033,6 +1033,29 @@ def interactive_login():
         print("    Silakan coba lagi dari menu Login.")
 
 
+def logout_snapchat(verbose: bool = True) -> bool:
+    """Completely logs out: removes saved session, browser profile, and resets cached contacts."""
+    try:
+        import shutil
+        if os.path.exists(STORAGE_STATE_FILE):
+            os.remove(STORAGE_STATE_FILE)
+        if os.path.exists(PROFILE_DIR):
+            shutil.rmtree(PROFILE_DIR, ignore_errors=True)
+        cfg = load_config()
+        cfg["contacts"] = []
+        cfg["streak_data"] = {}
+        save_config(cfg)
+        log_activity("AUTH", "Sesi login Snapchat dan cache kontak berhasil dibersihkan (Logout).")
+        if verbose:
+            print("\n[✓] Berhasil logout! Sesi akun dan cache teman telah dibersihkan.\n")
+        return True
+    except Exception as e:
+        log_activity("ERROR", f"Gagal logout: {e}")
+        if verbose:
+            print(f"\n[!] Gagal logout: {e}\n")
+        return False
+
+
 # ==============================================================================
 # Friends & Streak Scanning Engine
 # ==============================================================================
@@ -1633,6 +1656,7 @@ def menu_account():
             Choice(f"🔍 Pindai Kontak Teman dari Snapchat (Tersimpan: {len(contacts)} teman)", value="scan"),
             Choice("🔑 Login / Hubungkan Akun Snapchat (Buka Jendela Browser)", value="login"),
             Choice(f"ℹ️  Cek Ulang Status Sesi Login (Status: {status_label})", value="check"),
+            Choice("🚪 Logout / Hapus Sesi Akun & Reset Cache Teman", value="logout"),
             Separator(),
             Choice("🔙 Kembali ke Menu Utama", value="back")
         ]
@@ -1661,6 +1685,12 @@ def menu_account():
             print("\n[*] Memeriksa sesi browser Snapchat...")
             ok = check_login_status()
             print(f"[{'✓' if ok else '!'}] Status Sesi: {'🟢 VALID (Aktif)' if ok else '🔴 KADALUARSA / BELUM LOGIN'}\n")
+            questionary.press_any_key_to_continue().ask()
+
+        elif action == "logout":
+            confirm = questionary.confirm("Yakin ingin logout dan menghapus sesi akun serta cache teman?", default=False).ask()
+            if confirm:
+                logout_snapchat(verbose=True)
             questionary.press_any_key_to_continue().ask()
 
 
@@ -1870,6 +1900,7 @@ def main():
     parser.add_argument("--force", action="store_true", help="Force send even if streak already sent today")
     parser.add_argument("--scan", action="store_true", help="Scan Snapchat friends and exit")
     parser.add_argument("--login", action="store_true", help="Launch interactive login window")
+    parser.add_argument("--logout", action="store_true", help="Logout Snapchat and clear saved session and contacts")
     args = parser.parse_args()
 
     if args.cron:
@@ -1878,6 +1909,8 @@ def main():
         scan_snapchat_friends(verbose=True)
     elif args.login:
         interactive_login()
+    elif args.logout:
+        logout_snapchat(verbose=True)
     elif args.force:
         run_send_streak(force=True, verbose=True)
     else:
