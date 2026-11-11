@@ -8,6 +8,7 @@ License: MIT
 
 import os
 import sys
+import re
 import json
 import time
 import random
@@ -16,7 +17,6 @@ import socket
 import platform
 import argparse
 import subprocess
-import signal
 from datetime import datetime, date, timedelta
 
 def handle_sigint(sig=None, frame=None):
@@ -832,16 +832,26 @@ def is_page_logged_in(page) -> bool:
             if page.locator(sel).first.is_visible(timeout=300):
                 return False
 
-        body_text = page.locator("body").inner_text().lower()
-        if "log in to snapchat" in body_text or "browser not supported" in body_text:
-            return False
+        try:
+            body_text = page.locator("body").inner_text(timeout=1000).lower()
+            if "log in to snapchat" in body_text or "browser not supported" in body_text:
+                return False
+        except Exception:
+            pass
 
         # If chat feed or conversation list or camera button is visible
-        for chat_sel in ['[role="feed"]', '[data-testid*="chat"]', '[aria-label*="Chat"]', 'div[class*="chat"]', 'button[aria-label*="Camera"]', '[role="listitem"]']:
+        for chat_sel in [
+            '[aria-label="Friends Feed"]', 
+            '.ReactVirtualized__Grid', 
+            '[role="listitem"]', 
+            '[data-testid*="chat"]', 
+            '[aria-label*="Chat"]', 
+            'button[aria-label*="Camera"]'
+        ]:
             if page.locator(chat_sel).first.is_visible(timeout=400):
                 return True
 
-        if "web.snapchat.com" in url:
+        if "web.snapchat.com" in url or "snapchat.com/web" in url:
             return True
 
         return False
@@ -911,8 +921,8 @@ def verify_login_live(verbose: bool = True) -> bool:
         with sync_playwright() as p:
             ctx = launch_browser_context(p, headless=True)
             pg = ctx.new_page()
-            pg.goto(SNAPCHAT_WEB_URL, wait_until="networkidle", timeout=25000)
-            pg.wait_for_timeout(2500)
+            pg.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded", timeout=25000)
+            pg.wait_for_timeout(3500)
             is_valid = is_page_logged_in(pg)
             ctx.close()
             return is_valid
@@ -955,7 +965,7 @@ def interactive_login():
         context = launch_browser_context(p, headless=False)
         page = context.pages[0] if context.pages else context.new_page()
         try:
-            page.goto("https://web.snapchat.com", wait_until="networkidle", timeout=60000)
+            page.goto("https://web.snapchat.com", wait_until="domcontentloaded", timeout=60000)
         except Exception:
             pass
 
@@ -1031,77 +1041,72 @@ def scan_snapchat_friends_using_page(page, verbose: bool = True) -> list:
     cfg = load_config()
     existing_contacts = cfg.get("contacts", [])
     found_contacts = []
+    streak_data = cfg.get("streak_data", {})
 
     if verbose:
         print("[*] Memindai daftar teman dan status streak di Snapchat Web...")
 
-    page.wait_for_timeout(3000)
-
-    # Scroll conversation feed to load all items
-    feed_locators = ['div[role="feed"]', '[data-testid="chat-list"]', 'nav', 'ul', 'div[class*="chats"]', 'div[class*="conversation"]']
-    for feed_sel in feed_locators:
-        try:
-            feed = page.locator(feed_sel).first
-            if feed.is_visible():
-                for _ in range(5):
-                    feed.evaluate("el => el.scrollTop += 600")
-                    page.wait_for_timeout(600)
-                break
-        except Exception:
-            pass
-
-    # Extract conversation items
-    item_selectors = [
-        '[role="feed"] [role="listitem"]',
-        '[role="listitem"]',
-        '[data-testid*="chat-item"]',
-        '[data-testid*="conversation"]',
-        'div[class*="chat-item"]',
-        'div[class*="ConversationItem"]',
-        'div[class*="chatListItem"]',
-        'li[role="listitem"]'
-    ]
-    items = []
-    for sel in item_selectors:
-        matched = page.locator(sel).all()
-        if len(matched) > len(items):
-            items = matched
-
-    if not items:
-        items = page.locator('button[class*="chat"], div[role="button"]:has(span)').all()
+    page.wait_for_timeout(4000)
 
     ignore_names = {
         "chat", "new chat", "camera", "search", "stories", "spotlight", 
         "settings", "snapchat", "my story", "add friends", "log in", 
         "sign up", "terms", "privacy", "download", "lenses", "snapchat+",
-        "browser not supported"
+        "browser not supported", "my ai", "view", "new snap", "delivered",
+        "opened", "received", "tap to chat", "keep up with your friends",
+        "learn more about enabling notifications", "team snapchat"
     }
 
-    for item in items:
+    # Scroll up to top of friend feed first if possible
+    feed = page.locator('[aria-label="Friends Feed"], .ReactVirtualized__Grid').first
+    if feed.is_visible(timeout=2000):
         try:
-            text = item.inner_text()
-            if not text or len(text.strip()) == 0:
-                continue
-            lines = [l.strip() for l in text.split("\n") if l.strip()]
-            if not lines:
-                continue
-            name = lines[0]
-            if name.lower() in ignore_names or len(name) > 35:
-                continue
-
-            has_streak = "🔥" in text or "streak" in text.lower()
-            streak_badge = " 🔥" if has_streak else ""
-
-            if name not in found_contacts:
-                found_contacts.append(name)
-                if verbose:
-                    print(f"  • {name}{streak_badge}")
+            feed.evaluate("el => el.scrollTop = 0")
         except Exception:
-            continue
+            pass
+    page.wait_for_timeout(1000)
+
+    # Incrementally scroll down and accumulate friends across virtualized grid render cycles
+    for _ in range(16):
+        rows = page.locator('[role="listitem"]')
+        count = rows.count()
+        for i in range(count):
+            try:
+                txt = rows.nth(i).inner_text().strip()
+                if not txt:
+                    continue
+                lines = [l.strip() for l in txt.split("\n") if l.strip()]
+                if not lines:
+                    continue
+                # Line 0 might be an emoji avatar or notification badge (e.g. "😊", "🔥", "1", "2")
+                name = lines[1] if (len(lines[0]) <= 2 or lines[0] in ["😊", "🔥", "1", "2"]) and len(lines) > 1 else lines[0]
+                if name.lower() in ignore_names or len(name) > 35:
+                    continue
+                has_streak = "🔥" in txt
+                m = re.search(r"(\d+)\s*🔥", txt)
+                st_count = m.group(1) if m else ""
+                
+                if name not in found_contacts:
+                    found_contacts.append(name)
+                    if st_count:
+                        streak_data[name] = st_count
+                    if verbose:
+                        badge = f" ({st_count} 🔥)" if st_count else (" 🔥" if has_streak else "")
+                        print(f"  • {name}{badge}")
+            except Exception:
+                continue
+
+        # Scroll down
+        if feed.is_visible(timeout=500):
+            feed.evaluate("el => el.scrollTop += 600")
+        else:
+            page.mouse.wheel(0, 600)
+        page.wait_for_timeout(400)
 
     if found_contacts:
         merged = sorted(list(set(existing_contacts + found_contacts)))
         cfg["contacts"] = merged
+        cfg["streak_data"] = streak_data
         save_config(cfg)
         log_activity("JOB", f"Pindai kontak selesai: ditemukan {len(found_contacts)} teman.")
         if verbose:
@@ -1125,8 +1130,8 @@ def scan_snapchat_friends(verbose: bool = True) -> list:
         try:
             context = launch_browser_context(p, headless=True)
             page = context.new_page()
-            page.goto(SNAPCHAT_WEB_URL, wait_until="networkidle", timeout=30000)
-            page.wait_for_timeout(3000)
+            page.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(5000)
 
             if not is_page_logged_in(page):
                 if verbose:
