@@ -1236,16 +1236,15 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
         # Step 5: Select Recipients in modal
         # Method A: Use 'Streak' shortcut pill if available
         selected_via_shortcut = False
-        streak_pill = page.locator("form.tvul8 button:has-text('Streak'), .THeKv button:has-text('Streak'), button:has-text('Streak')").first
+        streak_pill = page.locator("button:has-text('Streak')").first
         if streak_pill.is_visible(timeout=2000):
             streak_pill.click()
             page.wait_for_timeout(1500)
-            select_btn = page.locator("text='Select', button:has-text('Select')").first
+            select_btn = page.locator("button:has-text('Select')").first
             if select_btn.is_visible(timeout=2000):
                 select_btn.click()
                 page.wait_for_timeout(1500)
                 selected_via_shortcut = True
-                sent = list(recipient_names)
 
         # Method B: Search or click individual recipients in modal
         if not selected_via_shortcut:
@@ -1274,12 +1273,13 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
                 except Exception:
                     failed.append(target)
 
-        # Step 6: Click Final Send Button
-        # Specifically target button.TYX6O or button with exact text 'Send' (avoid 'Send To')
-        final_send = page.locator("button.TYX6O, button:text-is('Send')").first
-        if final_send.is_visible(timeout=3000):
-            final_send.click(force=True)
+        # Step 6: Click Final Blue Send Button
+        send_btn = page.locator("button:has-text('Send'):not(:has-text('Send To')), button.TYX6O").first
+        if send_btn.is_visible(timeout=3000):
+            send_btn.click()
             page.wait_for_timeout(4000)
+            if selected_via_shortcut:
+                sent = list(recipient_names)
             log_activity("JOB", f"Snap berhasil dikirim ke {len(sent)} kontak.")
         else:
             raise RuntimeError("Tombol final 'Send' tidak aktif atau tidak ditemukan di antarmuka penerima.")
@@ -1287,6 +1287,7 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
     except Exception as e:
         log_activity("JOB", f"Error saat eksekusi take_and_send_snap: {e}")
         failed = [r for r in recipient_names if r not in sent]
+        sent = []
 
     return sent, failed
 
