@@ -1183,30 +1183,42 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
 
     try:
         # Step 1: Ensure camera interface is open and active
-        shutter = page.locator("button.fE2D5, button.gK0xL, button[class*='fE2D5'], button[class*='gK0xL']").first
-        if not shutter.is_visible(timeout=2000):
-            # Click the camera button to open camera feed
-            cam_btn = page.locator("button.qJKfS, div.Jq_5_ button, button:has-text('Click the Camera')").first
-            if cam_btn.is_visible(timeout=2000):
-                cam_btn.click()
-                page.wait_for_timeout(2500)
-            
-            # Re-locate shutter
+        # Allow video feed / WebRTC to stabilize
+        page.wait_for_timeout(3000)
+
+        # Step 2 & 4: Shutter and advance to Send To (with retry loop)
+        send_to_btn = None
+        for attempt in range(1, 4):
             shutter = page.locator("button.fE2D5, button.gK0xL, button[class*='fE2D5'], button[class*='gK0xL']").first
+            if not shutter.is_visible(timeout=1500):
+                cam_btn = page.locator("button.qJKfS, div.Jq_5_ button, button:has-text('Click the Camera')").first
+                if cam_btn.is_visible(timeout=1500):
+                    cam_btn.click()
+                    page.wait_for_timeout(2500)
+                shutter = page.locator("button.fE2D5, button.gK0xL, button[class*='fE2D5'], button[class*='gK0xL']").first
 
-        page.wait_for_timeout(1500)
+            # Click shutter
+            if shutter.is_visible(timeout=2000):
+                shutter.click()
+            else:
+                page.mouse.click(724, 755)
 
-        # Step 2: Click Shutter to take Snap
-        if shutter.is_visible(timeout=3000):
-            shutter.click()
-        else:
-            # Fallback coordinate click on center camera card
-            page.mouse.click(724, 755)
+            page.wait_for_timeout(2500)
 
-        page.wait_for_timeout(2500)
+            # Check if Send To appeared
+            candidate = page.locator("button:has-text('Send To'), button.fGS78").first
+            try:
+                if candidate.is_visible(timeout=3000):
+                    send_to_btn = candidate
+                    break
+            except Exception:
+                pass
+
+            log_activity("DEBUG", f"Shutter percobaan ke-{attempt} belum memunculkan 'Send To', mencoba lagi...")
+            page.wait_for_timeout(2000)
 
         # Step 3: Add Caption (if provided)
-        if caption_text:
+        if caption_text and send_to_btn:
             try:
                 cap_btn = page.locator("button[title='Add a caption'], button.xHw7V:has-text('T'), button:has-text('T')").first
                 if cap_btn.is_visible(timeout=1500):
@@ -1219,29 +1231,21 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
                 log_activity("DEBUG", f"Caption add skipped/failed: {e}")
 
         # Step 4: Click 'Send To' button
-        send_to_btn = page.locator("button:has-text('Send To'), button.fGS78").first
-        if not send_to_btn.is_visible(timeout=3000):
-            # Maybe camera preview didn't advance, retry shutter click
-            if shutter.is_visible(timeout=1000):
-                shutter.click()
-                page.wait_for_timeout(2500)
-            send_to_btn = page.locator("button:has-text('Send To'), button.fGS78").first
-
-        if send_to_btn.is_visible(timeout=3000):
+        if send_to_btn and send_to_btn.is_visible(timeout=3000):
             send_to_btn.click()
             page.wait_for_timeout(2500)
         else:
-            raise RuntimeError("Tombol 'Send To' tidak ditemukan setelah mengambil foto Snap.")
+            raise RuntimeError("Tombol 'Send To' tidak ditemukan setelah 3 percobaan jepret kamera.")
 
         # Step 5: Select Recipients in modal
         # Method A: Use 'Streak' shortcut pill if available
         selected_via_shortcut = False
         streak_pill = page.locator("button:has-text('Streak')").first
-        if streak_pill.is_visible(timeout=2000):
+        if streak_pill.is_visible(timeout=2500):
             streak_pill.click()
             page.wait_for_timeout(1500)
             select_btn = page.locator("button:has-text('Select')").first
-            if select_btn.is_visible(timeout=2000):
+            if select_btn.is_visible(timeout=2500):
                 select_btn.click()
                 page.wait_for_timeout(1500)
                 selected_via_shortcut = True
@@ -1275,7 +1279,7 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
 
         # Step 6: Click Final Blue Send Button
         send_btn = page.locator("button:has-text('Send'):not(:has-text('Send To')), button.TYX6O").first
-        if send_btn.is_visible(timeout=3000):
+        if send_btn.is_visible(timeout=4000):
             send_btn.click()
             page.wait_for_timeout(4000)
             if selected_via_shortcut:
@@ -1346,7 +1350,7 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
             context = launch_browser_context(p, headless=True)
             page = context.new_page()
             page.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(5000)
 
             # Check if login active
             if not is_page_logged_in(page):
@@ -1364,7 +1368,7 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
             sent, failed = take_and_send_snap(page, target_recipients, caption_text=resolved_cap)
             context.close()
 
-            success = len(sent) > 0 or len(target_recipients) == 0
+            success = len(sent) > 0 and len(failed) == 0
             summary = f"Terkirim: {len(sent)} | Gagal: {len(failed)}"
 
             save_state(success, len(sent), len(failed), summary)
@@ -1373,14 +1377,17 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
             # Send notifications
             names_preview = ", ".join(sent[:4]) + ("..." if len(sent) > 4 else "")
             notif_text = f"Terkirim: {len(sent)} | Gagal: {len(failed)}\nPenerima: {names_preview or 'None'}"
-            send_notification("Snapchat Streak Berhasil" if success else "Snapchat Streak Sebagian Gagal", notif_text, success=success)
+            send_notification("Snapchat Streak Berhasil" if success else "Snapchat Streak Gagal", notif_text, success=success)
 
             if verbose:
                 print("\n" + "=" * 65)
                 print(f"🏁 HASIL EKSEKUSI SNAP STREAK: {summary}")
                 print("=" * 65 + "\n")
 
-            return {"status": "success", "sent": len(sent), "failed": len(failed)}
+            if success:
+                return {"status": "success", "sent": len(sent), "failed": len(failed)}
+            else:
+                return {"status": "error", "sent": len(sent), "failed": len(failed), "message": summary}
 
         except Exception as e:
             err_msg = f"Terjadi kesalahan Playwright: {e}"
@@ -1897,8 +1904,13 @@ def run_cron_job(max_retries: int = 3, retry_delay: int = 40):
         if st in ("success", "skipped"):
             log_activity("SYSTEM", f"Cron selesai pada percobaan ke-{attempt}: {st}")
             return
-        elif attempt < max_retries:
-            time.sleep(retry_delay)
+        else:
+            msg = res.get("message", st)
+            log_activity("SYSTEM", f"Cron percobaan ke-{attempt} gagal ({msg}). Retrying in {retry_delay}s...")
+            if attempt < max_retries:
+                time.sleep(retry_delay)
+
+    log_activity("SYSTEM", f"Cron gagal setelah {max_retries} percobaan.")
 
 
 def main():
