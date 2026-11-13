@@ -4,6 +4,7 @@
 Automated Snap Dispatcher & Streak Maintenance via web.snapchat.com
 Author: Sam & Antigravity (Advanced Agentic Pair Programming)
 License: MIT
+Bilingual Support: English (Default) & Bahasa Indonesia
 """
 
 import os
@@ -19,29 +20,11 @@ import argparse
 import subprocess
 from datetime import datetime, date, timedelta
 
-def handle_sigint(sig=None, frame=None):
-    print("\n\n👋 Operasi dibatalkan oleh pengguna (Keluar). Sampai jumpa!\n")
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, handle_sigint)
-
-# Third-party dependencies (managed in venv)
-try:
-    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-    import questionary
-    from questionary import Choice, Separator
-    import requests
-except ImportError:
-    print("\n[!] Dependensi belum terpasang.")
-    print("    Jalankan './install.sh' atau 'pip install playwright questionary requests pillow'\n")
-    sys.exit(1)
-
-# ==============================================================================
-# Global Paths & Constants
-# ==============================================================================
-
+OS_NAME = platform.system()
+IS_CRON = "--cron" in sys.argv
 APP_NAME = "snapchat-streak"
-CURRENT_VERSION = "1.0.0"
+CURRENT_VERSION = "1.4.0"
+
 PRIMARY_UPDATE_URL = f"https://script.wsnsam.my.id/api/updates?app={APP_NAME}"
 FALLBACK_UPDATE_URL = f"https://raw.githubusercontent.com/sammmms/{APP_NAME}/main/version.json"
 SCRIPT_RAW_URL = f"https://raw.githubusercontent.com/sammmms/{APP_NAME}/main/snapchat-streak.py"
@@ -55,11 +38,325 @@ PROFILE_DIR = os.path.join(BASE_DIR, "browser_profile")
 STORAGE_STATE_FILE = os.path.join(BASE_DIR, "storage_state.json")
 TEMP_SNAP_IMAGE = os.path.join(BASE_DIR, "temp_snap.png")
 
-OS_NAME = platform.system()
-IS_CRON = "--cron" in sys.argv
-
 SNAPCHAT_WEB_URL = "https://web.snapchat.com"
 SNAPCHAT_LOGIN_URL = "https://accounts.snapchat.com/v2/login?continue=https%3A%2F%2Fweb.snapchat.com"
+
+# ==============================================================================
+# Internationalization (i18n): EN (Default) & ID
+# ==============================================================================
+
+DEFAULT_LANG = "en"
+CURRENT_LANG = "en"
+
+TRANSLATIONS = {
+    "en": {
+        "sigint_exit": "\n\n👋 Operation cancelled by user (Exit). Goodbye!\n",
+        "checking_updates": "Checking for updates",
+        "update_offline": "[*] Checking for updates... [Done / Offline Mode ✓]",
+        "update_latest": "[*] Checking for updates... [Latest Version: v{ver} ✓]",
+        "update_already_latest": "\n[✓] You are already on the latest version (v{ver}).\n",
+        "press_key_continue": "Press any key to continue...",
+        "press_key_return": "Press any key to return to menu...",
+        "update_available": "🎉 Snapchat Streak Update v{ver} Available! (Current: v{current})",
+        "changelog": "Release Notes (Changelog):",
+        "update_confirm": "Install update v{ver} now directly from the app?",
+        "update_downloading": "\n[*] Downloading snapchat-streak.py v{ver}...",
+        "update_download_fail": "[!] Failed to download update file.",
+        "update_success": "[✓] Successfully updated to version v{ver}!\n",
+        "restarting_app": "[*] Restarting application...",
+        "sched_macos_active": "Active (macOS LaunchAgent @ {time} with Wake-up Catch-up)",
+        "sched_macos_loaded": "Loaded (macOS LaunchAgent)",
+        "sched_win_active": "Active (Windows Task Scheduler)",
+        "sched_linux_active": "Active (Linux Crontab)",
+        "sched_not_configured": "Not Configured",
+        "sched_unsupported": "Unsupported OS",
+        "sched_installed_mac": "[✓] macOS LaunchAgent registered successfully at {time} with multi-interval wake-up catch-up!",
+        "sched_installed_win": "[✓] Windows Task Scheduler registered successfully at {time}.",
+        "sched_installed_linux": "[✓] Linux Crontab registered successfully at {time}.",
+        "sched_removed_mac": "[✓] macOS LaunchAgent removed.",
+        "sched_removed_win": "[✓] Windows Task Scheduler removed.",
+        "sched_removed_linux": "[✓] Linux Crontab removed.",
+        "wait_internet": "Checking internet connection",
+        "internet_connected": "[*] Internet connection: [Connected ✓] ({elapsed:.1f}s)",
+        "internet_connected_http": "[*] Internet connection: [Connected via HTTP ✓] ({elapsed:.1f}s)",
+        "internet_failed": "[!] Internet connection: [Failed / Timed Out]",
+        "dash_title": "👻 Snapchat Streak Auto-Saver & Helper Hub",
+        "dash_account_status": "👤 Account Session : ",
+        "dash_status_valid": "🟢 VALID (Active)",
+        "dash_status_unauthed": "🔴 NOT LOGGED IN",
+        "dash_today_status": "📅 Today's Status  : ",
+        "dash_today_sent": " 🟢 Already Sent Today",
+        "dash_today_failed": " 🔴 Failed Today",
+        "dash_today_pending": " ⌛ Not Sent Today",
+        "dash_recipient_mode": "👥 Recipient Mode  : ",
+        "dash_schedule": "⏰ Auto Schedule   : ",
+        "dash_warn_unauthed_title": "⚠️  ACCOUNT STATUS: NOT LOGGED IN / EMPTY SESSION",
+        "dash_warn_unauthed_desc1": "👉 You have not connected your Snapchat account yet.",
+        "dash_warn_unauthed_desc2": "   Streak automation cannot run before you log in.",
+        "dash_warn_unauthed_desc3": "👉 Please select [🔑 LOGIN NOW] in the menu below!",
+        "dash_mode_all": "Select All (All Friends)",
+        "dash_mode_groups": "Groups / Labeling",
+        "menu_select": "Select Menu:",
+        "menu_opt_login_req": "🔑 [REQUIRED] LOGIN / CONNECT ACCOUNT NOW (Open Browser)",
+        "menu_opt_run_need_login": "🚀 Send Streak Now (Login Required)",
+        "menu_opt_run": "🚀 Send Streak Now (Run Snap Check-in)",
+        "menu_opt_recipients": "👥 Manage Recipients & Caption (Recipients, Groups & Templates)",
+        "menu_opt_scheduler": "⏰ Daily Auto Schedule (LaunchAgent @ {time} + Wake-up Catch-up)",
+        "menu_opt_logs": "📜 Activity History & Logs (3-Day Retention)",
+        "menu_opt_account": "🔑 Account & Scan Contacts (Login & Scan Snapchat Friends)",
+        "menu_opt_notifications": "🔔 Notification Settings (Telegram / Discord)",
+        "menu_opt_check_update": "🔄 Check for Updates",
+        "menu_opt_lang": "🌐 Language / Bahasa (Current: {current})",
+        "menu_opt_exit": "🚪 Exit",
+        "goodbye": "\n👋 Goodbye! Your Snap streak is safe.\n",
+        "lang_menu_title": "🌐 Select Language / Pilih Bahasa:",
+        "lang_opt_en": "🇬🇧 English (Default)",
+        "lang_opt_id": "🇮🇩 Bahasa Indonesia",
+        "lang_opt_back": "🔙 Back / Kembali",
+        "lang_changed": "\n[✓] Language changed to: {lang}\n",
+        "current_lang_label": "Current",
+        "login_title": "🔑 LOGIN / CONNECT SNAPCHAT ACCOUNT (OFFICIAL BROWSER)",
+        "login_step_1": "1. An official browser window will open directly to Snapchat Web.",
+        "login_step_2": "2. Enter your Username / Email / Phone and Password.",
+        "login_step_3": "3. If prompted for 2FA or mobile app verification, please approve it.",
+        "login_step_4": "4. Make sure you can see the Snapchat Chat interface in the browser.",
+        "login_step_5": "5. RETURN TO THIS TERMINAL and press [ENTER].",
+        "login_step_5_sub": "   👉 The browser window will be closed automatically (do not close manually).",
+        "login_press_enter": "Press [ENTER] to open login browser window...",
+        "login_browser_opened": "\n[*] Browser window opened.",
+        "login_browser_hint": "[*] Please log in to your Snapchat account in the browser window.",
+        "login_wait_confirm": "\n👉 Once you have FINISHED LOGGING IN and can see the Chat page, press [ENTER] here...\n   (Browser will be closed automatically by script, do not close manually)",
+        "login_success": "\n[✓] Login SUCCESSFUL! Account session saved on computer.",
+        "login_failed_prompt": "\n[!] Notice: No active login session detected.\n    Make sure you completed login to the Chat screen before pressing [ENTER].\n    Please try again from Login menu.",
+        "scan_starting": "[*] Scanning friends list and streak status on Snapchat Web...",
+        "scan_not_connected": "\n[!] Your Snapchat account is not connected (Empty Session).\n    👉 Please select [🔑 Login / Connect Account] first to log in.",
+        "scan_session_expired": "\n[!] Snapchat account session expired or not logged in.\n    👉 Please select [🔑 Login / Connect Account] to re-login.",
+        "scan_found_summary": "\n[✓] Successfully saved {count} friends to contact list.\n",
+        "scan_none_detected": "[-] No friend conversations detected automatically.\n    Make sure you are logged in and have the Chat tab visible on Snapchat Web.",
+        "scan_error": "[!] Failed to scan contacts: {err}",
+        "logout_confirm": "Are you sure you want to log out and clear saved session and friend cache?",
+        "logout_success": "\n[✓] Logout successful! Session and friend cache cleared.\n",
+        "logout_failed": "\n[!] Logout failed: {err}\n",
+        "streak_skipped_today": "Streak today ({date}) was already sent at {time}.",
+        "streak_no_targets": "No target contacts selected. Please Scan Contacts or assign Groups in Menu 2.",
+        "streak_offline": "Failed to connect to internet within tolerance window.",
+        "streak_starting_banner": "🚀 STARTING SNAP STREAK DISPATCH ({count} Contacts)",
+        "streak_session_expired": "Snapchat login session expired or not logged in. Please log in via terminal menu.",
+        "streak_exec_result": "🏁 SNAP STREAK EXECUTION RESULT: {summary}",
+        "recip_menu_title": "👥 Manage Recipients & Caption [Mode: {mode}]:",
+        "recip_toggle_mode": "🔄 Switch Mode (Current: {mode})",
+        "recip_checklist": "📋 Contact Checklist & Assign Groups (Multi-select)",
+        "recip_groups": "🏷️  Manage Group Labels",
+        "recip_caption": "💬 Configure Snap Caption (Default, Random Pool & Custom)",
+        "recip_exclude": "🚫 Manage Exclude / Blacklist",
+        "recip_preview": "👁️  Preview Caption to be Sent",
+        "recip_back": "🔙 Back to Main Menu",
+        "recip_mode_changed": "\n[✓] Recipient mode changed to: {mode}\n",
+        "sched_menu_title": "⏰ Daily Schedule Manager [{os}] (Status: {badge}):",
+        "sched_opt_install": "⏰ Enable / Install Daily Schedule (Runs at {time} + Auto Catch-up)",
+        "sched_opt_change_time": "🕒 Change Run Time (Current: {time})",
+        "sched_opt_remove": "🗑️  Disable / Remove Schedule",
+        "sched_prompt_new_time": "Enter new time (Format HH:MM, e.g. 08:30):",
+        "sched_time_changed": "\n[✓] Schedule time changed to {time}.",
+        "sched_time_invalid": "\n[!] Invalid time format.",
+        "notif_menu_title": "🔔 Notification Settings:",
+        "notif_telegram": "📱 Telegram Bot: {status}",
+        "notif_discord": "💬 Discord Webhook: {status}",
+        "notif_test_all": "🔔 Test All Active Notifications",
+        "notif_back": "🔙 Back to Main Menu",
+        "notif_test_sending": "\n[*] Sending test notification to all active channels...",
+        "notif_test_done": "[✓] Test notifications dispatched!\n",
+        "status_active_upper": "🟢 ACTIVE",
+        "status_inactive_upper": "⚪ INACTIVE",
+        "account_menu_title": "🔑 Snapchat Account & Contact Management:",
+        "account_opt_scan": "🔍 Scan Friends from Snapchat (Saved: {count} friends)",
+        "account_opt_login": "🔑 Login / Connect Snapchat Account (Open Browser)",
+        "account_opt_check": "ℹ️  Re-check Session Status (Status: {status})",
+        "account_opt_logout": "🚪 Logout / Clear Session & Reset Friend Cache",
+        "account_opt_back": "🔙 Back to Main Menu",
+        "logs_menu_title": "📜 Activity History & Logs (3-Day Retention):",
+        "logs_opt_all": "📜 View All Logs (Last 3 Days)",
+        "logs_opt_job": "🚀 Filter Snap Execution Logs (JOB)",
+        "logs_opt_config": "⚙️  Filter Configuration Changes (CONFIG)",
+        "logs_opt_clean": "🧹 Clear Logs Manually Now",
+        "logs_opt_back": "🔙 Back to Main Menu",
+        "logs_clean_confirm": "Delete all activity logs now?",
+        "logs_cleaned": "\n[✓] All activity logs cleared successfully!\n",
+        "notif_streak_success_title": "Snapchat Streak Success",
+        "notif_streak_fail_title": "Snapchat Streak Failed",
+    },
+    "id": {
+        "sigint_exit": "\n\n👋 Operasi dibatalkan oleh pengguna (Keluar). Sampai jumpa!\n",
+        "checking_updates": "Memeriksa pembaruan terbaru",
+        "update_offline": "[*] Memeriksa pembaruan terbaru... [Selesai / Mode Offline ✓]",
+        "update_latest": "[*] Memeriksa pembaruan terbaru... [Versi Terbaru: v{ver} ✓]",
+        "update_already_latest": "\n[✓] Anda sudah menggunakan versi paling baru (v{ver}).\n",
+        "press_key_continue": "Tekan tombol apa saja untuk melanjutkan...",
+        "press_key_return": "Tekan tombol apa saja untuk kembali ke menu...",
+        "update_available": "🎉 Pembaruan Snapchat Streak v{ver} Tersedia! (Versi saat ini: v{current})",
+        "changelog": "Catatan Rilis (Changelog):",
+        "update_confirm": "Pasang pembaruan v{ver} sekarang langsung dari aplikasi?",
+        "update_downloading": "\n[*] Mengunduh snapchat-streak.py v{ver}...",
+        "update_download_fail": "[!] Gagal mengunduh berkas pembaruan.",
+        "update_success": "[✓] Berhasil diperbarui ke versi v{ver}!\n",
+        "restarting_app": "[*] Memulai ulang aplikasi...",
+        "sched_macos_active": "Active (macOS LaunchAgent @ {time} with Wake-up Catch-up)",
+        "sched_macos_loaded": "Loaded (macOS LaunchAgent)",
+        "sched_win_active": "Active (Windows Task Scheduler)",
+        "sched_linux_active": "Active (Linux Crontab)",
+        "sched_not_configured": "Belum Dikonfigurasi",
+        "sched_unsupported": "Sistem Operasi Tidak Didukung",
+        "sched_installed_mac": "[✓] Jadwal harian berhasil didaftarkan pukul {time} dengan multi-interval catch-up via macOS LaunchAgent!",
+        "sched_installed_win": "[✓] Windows Task Scheduler berhasil didaftarkan pukul {time}.",
+        "sched_installed_linux": "[✓] Linux Crontab berhasil didaftarkan pukul {time}.",
+        "sched_removed_mac": "[✓] macOS LaunchAgent berhasil dihapus.",
+        "sched_removed_win": "[✓] Windows Task Scheduler berhasil dihapus.",
+        "sched_removed_linux": "[✓] Linux Crontab berhasil dihapus.",
+        "wait_internet": "Memeriksa koneksi internet",
+        "internet_connected": "[*] Koneksi internet: [Terhubung ✓] ({elapsed:.1f}s)",
+        "internet_connected_http": "[*] Koneksi internet: [Terhubung via HTTP ✓] ({elapsed:.1f}s)",
+        "internet_failed": "[!] Koneksi internet: [Gagal / Batas Waktu Habis]",
+        "dash_title": "👻 Snapchat Streak Auto-Saver & Helper Hub",
+        "dash_account_status": "👤 Akun Sesi      : ",
+        "dash_status_valid": "🟢 VALID (Aktif)",
+        "dash_status_unauthed": "🔴 BELUM LOGIN",
+        "dash_today_status": "📅 Status Hari Ini: ",
+        "dash_today_sent": " 🟢 Sudah Terkirim Hari Ini",
+        "dash_today_failed": " 🔴 Gagal Hari Ini",
+        "dash_today_pending": " ⌛ Belum Terkirim Hari Ini",
+        "dash_recipient_mode": "👥 Mode Penerima  : ",
+        "dash_schedule": "⏰ Jadwal Auto    : ",
+        "dash_warn_unauthed_title": "⚠️  STATUS AKUN: BELUM LOGIN / SESI KOSONG",
+        "dash_warn_unauthed_desc1": "👉 Anda belum menghubungkan akun Snapchat.",
+        "dash_warn_unauthed_desc2": "   Otomasi streak tidak dapat berjalan sebelum Anda login terlebih dahulu.",
+        "dash_warn_unauthed_desc3": "👉 Silakan pilih menu [🔑 LOGIN SEKARANG] di bawah ini!",
+        "dash_mode_all": "Select All (Semua Teman)",
+        "dash_mode_groups": "Groups / Labeling",
+        "menu_select": "Pilih Menu:",
+        "menu_opt_login_req": "🔑 [WAJIB] LOGIN / HUBUNGKAN AKUN SEKARANG (Buka Browser)",
+        "menu_opt_run_need_login": "🚀 Kirim Streak Sekarang (Perlu Login Terlebih Dahulu)",
+        "menu_opt_run": "🚀 Kirim Streak Sekarang (Run Snap Check-in)",
+        "menu_opt_recipients": "👥 Kelola Penerima & Caption (Penerima, Grup & Template)",
+        "menu_opt_scheduler": "⏰ Jadwal Otomatis Harian (LaunchAgent @ {time} + Wake-up Catch-up)",
+        "menu_opt_logs": "📜 Riwayat Aktivitas & Log (Tersimpan 3 Hari)",
+        "menu_opt_account": "🔑 Akun & Pindai Kontak (Login & Scan Teman Snapchat)",
+        "menu_opt_notifications": "🔔 Pengaturan Notifikasi (Telegram / Discord)",
+        "menu_opt_check_update": "🔄 Cek Pembaruan Aplikasi (Check for Updates)",
+        "menu_opt_lang": "🌐 Language / Bahasa (Saat ini: {current})",
+        "menu_opt_exit": "🚪 Keluar",
+        "goodbye": "\n👋 Sampai jumpa! Snap streak Anda aman.\n",
+        "lang_menu_title": "🌐 Pilih Bahasa / Select Language:",
+        "lang_opt_en": "🇬🇧 English (Default)",
+        "lang_opt_id": "🇮🇩 Bahasa Indonesia",
+        "lang_opt_back": "🔙 Kembali / Back",
+        "lang_changed": "\n[✓] Bahasa berhasil diubah ke: {lang}\n",
+        "current_lang_label": "Saat ini",
+        "login_title": "🔑 LOGIN / HUBUNGKAN AKUN SNAPCHAT (BROWSER RESMI)",
+        "login_step_1": "1. Jendela browser resmi akan terbuka langsung ke Snapchat Web.",
+        "login_step_2": "2. Masukkan Username / Email / Nomor HP dan Password Anda.",
+        "login_step_3": "3. Jika diminta verifikasi 2FA atau notifikasi di aplikasi HP, silakan setujui.",
+        "login_step_4": "4. Pastikan Anda sudah melihat halaman obrolan / daftar Chat di browser.",
+        "login_step_5": "5. KEMBALI KE TERMINAL INI dan tekan [ENTER].",
+        "login_step_5_sub": "   👉 Jendela browser akan ditutup otomatis oleh script (jangan tutup manual).",
+        "login_press_enter": "Tekan [ENTER] untuk membuka jendela browser login...",
+        "login_browser_opened": "\n[*] Jendela browser telah terbuka.",
+        "login_browser_hint": "[*] Silakan login akun Snapchat Anda di browser tersebut.",
+        "login_wait_confirm": "\n👉 Setelah Anda SUDAH SELESAI LOGIN dan melihat halaman obrolan/Chat di browser, tekan [ENTER] di sini...\n   (Browser akan ditutup otomatis oleh script, jangan ditutup manual)",
+        "login_success": "\n[✓] Login BERHASIL! Sesi akun tersimpan rapi di komputer.",
+        "login_failed_prompt": "\n[!] Perhatian: Belum terdeteksi sesi login aktif.\n    Pastikan Anda sudah menyelesaikan proses login sampai halaman Chat sebelum menekan [ENTER].\n    Silakan coba lagi dari menu Login.",
+        "scan_starting": "[*] Memindai daftar teman dan status streak di Snapchat Web...",
+        "scan_not_connected": "\n[!] Akun Snapchat Anda belum terhubung (Sesi Kosong).\n    👉 Silakan pilih menu [🔑 Login / Hubungkan Akun] terlebih dahulu untuk login.",
+        "scan_session_expired": "\n[!] Sesi akun Snapchat kedaluwarsa atau belum login.\n    👉 Silakan pilih menu [🔑 Login / Hubungkan Akun] untuk login ulang.",
+        "scan_found_summary": "\n[✓] Berhasil menyimpan {count} teman ke daftar kontak.\n",
+        "scan_none_detected": "[-] Tidak ada percakapan teman yang terdeteksi secara otomatis.\n    Pastikan Anda sudah login dan membuka tab Chat di Snapchat Web.",
+        "scan_error": "[!] Gagal memindai kontak: {err}",
+        "logout_confirm": "Yakin ingin logout dan menghapus sesi akun serta cache teman?",
+        "logout_success": "\n[✓] Berhasil logout! Sesi akun dan cache teman telah dibersihkan.\n",
+        "logout_failed": "\n[!] Gagal logout: {err}\n",
+        "streak_skipped_today": "Streak hari ini ({date}) sudah terkirim pada {time}.",
+        "streak_no_targets": "Tidak ada kontak target yang dipilih. Silakan Pindai Kontak atau tentukan Grup di Menu 2.",
+        "streak_offline": "Gagal terhubung ke internet dalam batas waktu toleransi.",
+        "streak_starting_banner": "🚀 MEMULAI PENGIRIMAN SNAP STREAK ({count} Kontak)",
+        "streak_session_expired": "Sesi login Snapchat kedaluwarsa atau belum login. Silakan login via menu terminal.",
+        "streak_exec_result": "🏁 HASIL EKSEKUSI SNAP STREAK: {summary}",
+        "recip_menu_title": "👥 Kelola Penerima & Caption [Mode: {mode}]:",
+        "recip_toggle_mode": "🔄 Ganti Mode Pengiriman (Saat ini: {mode})",
+        "recip_checklist": "📋 Checklist Kontak & Tetapkan Grup (Multi-select)",
+        "recip_groups": "🏷️  Kelola Label Grup",
+        "recip_caption": "💬 Konfigurasi Caption Snap (Default, Pool Acak & Khusus)",
+        "recip_exclude": "🚫 Kelola Daftar Pengecualian (Blacklist / Exclude)",
+        "recip_preview": "👁️  Pratinjau Caption yang Akan Dikirim (Preview)",
+        "recip_back": "🔙 Kembali ke Menu Utama",
+        "recip_mode_changed": "\n[✓] Mode pengiriman diubah ke: {mode}\n",
+        "sched_menu_title": "⏰ Pengatur Jadwal Harian [{os}] (Status: {badge}):",
+        "sched_opt_install": "⏰ Pasang / Aktifkan Jadwal Harian (Jam {time} + Auto Catch-up)",
+        "sched_opt_change_time": "🕒 Ubah Jam Eksekusi (Saat ini: Jam {time})",
+        "sched_opt_remove": "🗑️  Matikan / Hapus Jadwal",
+        "sched_prompt_new_time": "Masukkan jam baru (Format JJ:MM, contoh: 08:30):",
+        "sched_time_changed": "\n[✓] Waktu jadwal diubah ke {time}.",
+        "sched_time_invalid": "\n[!] Format waktu salah.",
+        "notif_menu_title": "🔔 Pengaturan Notifikasi ke HP:",
+        "notif_telegram": "📱 Telegram Bot: {status}",
+        "notif_discord": "💬 Discord Webhook: {status}",
+        "notif_test_all": "🔔 Tes Semua Notifikasi Aktif",
+        "notif_back": "🔙 Kembali ke Menu Utama",
+        "notif_test_sending": "\n[*] Mengirim notifikasi tes ke semua channel aktif...",
+        "notif_test_done": "[✓] Notifikasi tes selesai dikirim!\n",
+        "status_active_upper": "🟢 AKTIF",
+        "status_inactive_upper": "⚪ NONAKTIF",
+        "account_menu_title": "🔑 Manajemen Akun & Kontak Snapchat:",
+        "account_opt_scan": "🔍 Pindai Kontak Teman dari Snapchat (Tersimpan: {count} teman)",
+        "account_opt_login": "🔑 Login / Hubungkan Akun Snapchat (Buka Jendela Browser)",
+        "account_opt_check": "ℹ️  Cek Ulang Status Sesi Login (Status: {status})",
+        "account_opt_logout": "🚪 Logout / Hapus Sesi Akun & Reset Cache Teman",
+        "account_opt_back": "🔙 Kembali ke Menu Utama",
+        "logs_menu_title": "📜 Riwayat Aktivitas & Log (Retensi Otomatis 3 Hari):",
+        "logs_opt_all": "📜 Lihat Semua Log (3 Hari Terakhir)",
+        "logs_opt_job": "🚀 Filter Log Eksekusi Snap (JOB)",
+        "logs_opt_config": "⚙️  Filter Perubahan Pengaturan (CONFIG)",
+        "logs_opt_clean": "🧹 Bersihkan Log Manual Sekarang",
+        "logs_opt_back": "🔙 Kembali ke Menu Utama",
+        "logs_clean_confirm": "Hapus semua log aktivitas sekarang?",
+        "logs_cleaned": "\n[✓] Seluruh riwayat log berhasil dibersihkan!\n",
+        "notif_streak_success_title": "Snapchat Streak Berhasil",
+        "notif_streak_fail_title": "Snapchat Streak Gagal",
+    }
+}
+
+def t(key: str, default: str = None, **kwargs) -> str:
+    lang = CURRENT_LANG if CURRENT_LANG in TRANSLATIONS else DEFAULT_LANG
+    s = TRANSLATIONS.get(lang, {}).get(key)
+    if s is None:
+        s = TRANSLATIONS.get(DEFAULT_LANG, {}).get(key, default if default is not None else key)
+    if kwargs:
+        try:
+            return s.format(**kwargs)
+        except Exception:
+            return s
+    return s
+
+def set_language(lang_code: str):
+    global CURRENT_LANG
+    if str(lang_code).lower() in ("id", "in", "indonesia", "indonesian"):
+        CURRENT_LANG = "id"
+    else:
+        CURRENT_LANG = "en"
+
+def handle_sigint(sig=None, frame=None):
+    print(t("sigint_exit"))
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, handle_sigint)
+
+# Third-party dependencies (managed in venv)
+try:
+    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+    import questionary
+    from questionary import Choice, Separator
+    import requests
+except ImportError:
+    print("\n[!] Missing dependencies. Run './install.sh' or 'pip install playwright questionary requests pillow'\n")
+    sys.exit(1)
 
 # ==============================================================================
 # Semver & Update Checker
@@ -77,9 +374,7 @@ def parse_semver(ver: str) -> tuple:
         parts.append(0)
     return tuple(parts[:3])
 
-
 def run_with_progress(title: str, worker_fn, timeout: float = 4.0):
-    """Executes worker_fn in a daemon thread while rendering an animated progress bar and spinner."""
     import threading
     res = {"done": False, "result": None, "error": None}
 
@@ -91,8 +386,8 @@ def run_with_progress(title: str, worker_fn, timeout: float = 4.0):
         finally:
             res["done"] = True
 
-    t = threading.Thread(target=target, daemon=True)
-    t.start()
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
 
     frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     start_t = time.time()
@@ -112,9 +407,7 @@ def run_with_progress(title: str, worker_fn, timeout: float = 4.0):
     sys.stdout.flush()
     return res["result"], res["error"]
 
-
 def check_for_updates(prompt_if_latest: bool = False):
-    """Checks remote repository for newer version with animated progress."""
     def fetch_remote():
         for target_url in [PRIMARY_UPDATE_URL, FALLBACK_UPDATE_URL]:
             try:
@@ -125,13 +418,13 @@ def check_for_updates(prompt_if_latest: bool = False):
                 continue
         return None
 
-    update_data, _ = run_with_progress("Memeriksa pembaruan terbaru", fetch_remote, timeout=3.5)
+    update_data, _ = run_with_progress(t("checking_updates"), fetch_remote, timeout=3.5)
 
     if not update_data or not isinstance(update_data, dict) or "version" not in update_data:
-        sys.stdout.write("[*] Memeriksa pembaruan terbaru... [Selesai / Mode Offline ✓]\n")
+        sys.stdout.write(f"{t('update_offline')}\n")
         sys.stdout.flush()
         if prompt_if_latest:
-            questionary.press_any_key_to_continue().ask()
+            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
         return
 
     try:
@@ -140,24 +433,24 @@ def check_for_updates(prompt_if_latest: bool = False):
         local_ver = parse_semver(CURRENT_VERSION)
 
         if remote_ver > local_ver:
-            print(f"\r[*] Memeriksa pembaruan terbaru... [Versi Baru Tersedia: v{remote_ver_str}!]")
+            print(f"\r[*] {t('checking_updates')}... [v{remote_ver_str}]")
             changelogs = update_data.get("changelog", [])
             print("\n" + "=" * 60)
-            print(f"🎉 Pembaruan Snapchat Streak v{remote_ver_str} Tersedia! (Versi saat ini: v{CURRENT_VERSION})")
+            print(t("update_available", ver=remote_ver_str, current=CURRENT_VERSION))
             print("=" * 60)
             if changelogs:
-                print("Catatan Rilis (Changelog):")
+                print(t("changelog"))
                 for c in changelogs:
                     print(f"  • {c}")
             print("=" * 60 + "\n")
 
             update_now = questionary.confirm(
-                f"Pasang pembaruan v{remote_ver_str} sekarang langsung dari aplikasi?",
+                t("update_confirm", ver=remote_ver_str),
                 default=True
             ).ask()
 
             if update_now:
-                print(f"\n[*] Mengunduh snapchat-streak.py v{remote_ver_str}...")
+                print(t("update_downloading", ver=remote_ver_str))
                 dl_url = update_data.get("download_url", SCRIPT_RAW_URL)
                 dl_resp = requests.get(dl_url, timeout=15)
                 if dl_resp.status_code == 200 and len(dl_resp.text) > 1000:
@@ -171,31 +464,28 @@ def check_for_updates(prompt_if_latest: bool = False):
                                 rf.write(dl_resp.text)
                         except Exception:
                             pass
-                    print(f"[✓] Berhasil diperbarui ke versi v{remote_ver_str}!\n")
-                    log_activity("SYSTEM", f"Aplikasi berhasil diperbarui dari v{CURRENT_VERSION} ke v{remote_ver_str}")
-                    print("[*] Memulai ulang aplikasi...")
+                    print(t("update_success", ver=remote_ver_str))
+                    log_activity("SYSTEM", f"App updated from v{CURRENT_VERSION} to v{remote_ver_str}")
+                    print(t("restarting_app"))
                     time.sleep(1.5)
                     os.execv(sys.executable, [sys.executable] + sys.argv)
                 else:
-                    print("[!] Gagal mengunduh berkas pembaruan.")
-                    questionary.press_any_key_to_continue().ask()
+                    print(t("update_download_fail"))
+                    questionary.press_any_key_to_continue(t("press_key_continue")).ask()
         else:
-            sys.stdout.write(f"\r[*] Memeriksa pembaruan terbaru... [Versi Terbaru: v{CURRENT_VERSION} ✓]\n")
+            sys.stdout.write(f"\r{t('update_latest', ver=CURRENT_VERSION)}\n")
             sys.stdout.flush()
             if prompt_if_latest:
-                print(f"\n[✓] Anda sudah menggunakan versi paling baru (v{CURRENT_VERSION}).\n")
-                questionary.press_any_key_to_continue().ask()
+                print(t("update_already_latest", ver=CURRENT_VERSION))
+                questionary.press_any_key_to_continue(t("press_key_continue")).ask()
     except Exception:
-        sys.stdout.write("[*] Memeriksa pembaruan terbaru... [Mode Offline ✓]\n")
+        sys.stdout.write(f"\r{t('update_offline')}\n")
         sys.stdout.flush()
         if prompt_if_latest:
-            questionary.press_any_key_to_continue().ask()
-
-# ==============================================================================
-# Configuration & State Management
-# ==============================================================================
+            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
 DEFAULT_CONFIG = {
+    "language": "en",  # "en" or "id"
     "mode": "all",  # "all" or "groups"
     "default_caption": "🔥",
     "contacts": [],
@@ -209,14 +499,14 @@ DEFAULT_CONFIG = {
         "exclude": []
     },
     "messages": {
-        "mode": "single",  # "single" or "pool"
+        "mode": "single",
         "pool": [
             "🔥",
             "Streak 🔥⚡",
-            "Selamat {time_greeting} {first_name}! Streak 🔥",
-            "Semangat hari {day} ya {first_name}! 🔥",
-            "Streak hari ini {first_name} 🔥✨",
-            "Pagi {first_name}! Jangan lupa streak yaa 🔥",
+            "Good {time_greeting} {first_name}! Streak 🔥",
+            "Happy {day} {first_name}! 🔥",
+            "Streak for today {first_name} 🔥✨",
+            "Good morning {first_name}! Don't forget our streak 🔥",
             "Streak {date} 🔥💪"
         ],
         "overrides": {}
@@ -232,12 +522,10 @@ DEFAULT_CONFIG = {
     }
 }
 
-
 def ensure_dirs():
     os.makedirs(BASE_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(PROFILE_DIR, exist_ok=True)
-
 
 def deep_merge(target: dict, default: dict):
     for k, v in default.items():
@@ -245,7 +533,6 @@ def deep_merge(target: dict, default: dict):
             target[k] = v
         elif isinstance(v, dict) and isinstance(target[k], dict):
             deep_merge(target[k], v)
-
 
 def load_config() -> dict:
     ensure_dirs()
@@ -260,155 +547,123 @@ def load_config() -> dict:
     except Exception:
         return DEFAULT_CONFIG.copy()
 
-
 def save_config(cfg: dict):
     ensure_dirs()
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
 
-
 def load_state() -> dict:
-    ensure_dirs()
-    if not os.path.exists(STATE_FILE):
-        return {
-            "last_date": None,
-            "last_time": None,
-            "success": False,
-            "sent_count": 0,
-            "failed_count": 0,
-            "summary": "Belum pernah dijalankan"
-        }
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "last_date": "",
+        "last_time": "",
+        "success": False,
+        "sent_count": 0,
+        "failed_count": 0,
+        "summary": "Never executed"
+    }
 
-
-def save_state(success: bool, sent_count: int, failed_count: int, summary: str):
-    ensure_dirs()
+def save_state(success: bool, sent: int, failed: int, summary: str = ""):
     now = datetime.now()
     state = {
         "last_date": now.strftime("%Y-%m-%d"),
-        "last_time": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "last_time": now.strftime("%H:%M:%S"),
         "success": success,
-        "sent_count": sent_count,
-        "failed_count": failed_count,
+        "sent_count": sent,
+        "failed_count": failed,
         "summary": summary
     }
     with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
-
-
-# ==============================================================================
-# 3-Day Activity Logging with Auto-Pruning
-# ==============================================================================
+        json.dump(state, f, indent=2)
 
 def clean_expired_logs(retention_days: int = 3):
     ensure_dirs()
-    now = datetime.now()
-    try:
-        for fname in os.listdir(LOG_DIR):
-            if fname.startswith("activity_") and fname.endswith(".log"):
-                date_part = fname[len("activity_"):-len(".log")]
-                try:
-                    f_date = datetime.strptime(date_part, "%Y-%m-%d")
-                    diff = (now - f_date).days
-                    if diff > retention_days:
-                        os.remove(os.path.join(LOG_DIR, fname))
-                except ValueError:
-                    pass
+    cutoff_date = datetime.now() - timedelta(days=retention_days)
+    pattern = re.compile(r"^activity_(\d{4}-\d{2}-\d{2})\.log$")
 
-        main_log = os.path.join(BASE_DIR, "streak.log")
-        if os.path.exists(main_log):
-            stat = os.stat(main_log)
-            file_mtime = datetime.fromtimestamp(stat.st_mtime)
-            if (now - file_mtime).days > retention_days or stat.st_size > 10 * 1024 * 1024:
-                try:
-                    with open(main_log, "r", encoding="utf-8", errors="ignore") as lf:
-                        lines = lf.readlines()
-                    cutoff_str = (now - timedelta(days=retention_days)).strftime("%Y-%m-%d")
-                    fresh_lines = [l for l in lines if cutoff_str in l or not l.startswith("[20")]
-                    with open(main_log, "w", encoding="utf-8") as lf:
-                        lf.writelines(fresh_lines[-1000:])
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
+    for fname in os.listdir(LOG_DIR):
+        m = pattern.match(fname)
+        if m:
+            try:
+                fdate = datetime.strptime(m.group(1), "%Y-%m-%d")
+                if fdate < cutoff_date:
+                    os.remove(os.path.join(LOG_DIR, fname))
+            except Exception:
+                pass
 
 def log_activity(category: str, message: str, print_to_console: bool = False):
     ensure_dirs()
-    clean_expired_logs(retention_days=3)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    entry = f"[{now_str}] [{category:<6}] {message}"
+    if print_to_console and not IS_CRON:
+        print(f"[*] {message}")
 
-    now = datetime.now()
-    today_str = now.strftime("%Y-%m-%d")
-    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
-
-    entry = f"[{timestamp}] [{category.upper():<6}] {message}\n"
-
-    daily_file = os.path.join(LOG_DIR, f"activity_{today_str}.log")
+    today_log = os.path.join(LOG_DIR, f"activity_{datetime.now().strftime('%Y-%m-%d')}.log")
     try:
-        with open(daily_file, "a", encoding="utf-8") as f:
-            f.write(entry)
+        with open(today_log, "a", encoding="utf-8") as f:
+            f.write(entry + "\n")
     except Exception:
         pass
 
-    main_log = os.path.join(BASE_DIR, "streak.log")
+    global_log = os.path.join(BASE_DIR, "streak.log")
     try:
-        with open(main_log, "a", encoding="utf-8") as f:
-            f.write(entry)
+        with open(global_log, "a", encoding="utf-8") as f:
+            f.write(entry + "\n")
     except Exception:
         pass
-
-    if print_to_console:
-        print(f"[{category.upper()}] {message}")
-
 
 def log_message(msg: str):
     log_activity("JOB", msg, print_to_console=True)
 
-
 # ==============================================================================
-# Message & Caption Template Engine
+# Caption Template Engine & Placeholders
 # ==============================================================================
-
-INDONESIAN_DAYS = {
-    0: "Senin", 1: "Selasa", 2: "Rabu", 3: "Kamis", 4: "Jumat", 5: "Sabtu", 6: "Minggu"
-}
-INDONESIAN_MONTHS = {
-    1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "Mei", 6: "Jun",
-    7: "Jul", 8: "Agu", 9: "Sep", 10: "Okt", 11: "Nov", 12: "Des"
-}
-
 
 def format_caption(template: str, contact_name: str) -> str:
     now = datetime.now()
     hour = now.hour
 
-    if 4 <= hour < 11:
-        time_greeting = "Pagi"
-    elif 11 <= hour < 15:
-        time_greeting = "Siang"
-    elif 15 <= hour < 18:
-        time_greeting = "Sore"
+    if CURRENT_LANG == "id":
+        if 4 <= hour < 11:
+            time_greeting = "Pagi"
+        elif 11 <= hour < 15:
+            time_greeting = "Siang"
+        elif 15 <= hour < 18:
+            time_greeting = "Sore"
+        else:
+            time_greeting = "Malam"
+        days_map = {0: "Senin", 1: "Selasa", 2: "Rabu", 3: "Kamis", 4: "Jumat", 5: "Sabtu", 6: "Minggu"}
+        months_map = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "Mei", 6: "Jun", 7: "Jul", 8: "Agu", 9: "Sep", 10: "Okt", 11: "Nov", 12: "Des"}
+        default_name = "Teman"
     else:
-        time_greeting = "Malam"
+        if 4 <= hour < 12:
+            time_greeting = "Morning"
+        elif 12 <= hour < 17:
+            time_greeting = "Afternoon"
+        elif 17 <= hour < 21:
+            time_greeting = "Evening"
+        else:
+            time_greeting = "Night"
+        days_map = {0: "Monday", 1: "Tuesday", 2: "Wednesday", 3: "Thursday", 4: "Friday", 5: "Saturday", 6: "Sunday"}
+        months_map = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun", 7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
+        default_name = "Friend"
 
-    day_name = INDONESIAN_DAYS.get(now.weekday(), "Hari")
-    month_name = INDONESIAN_MONTHS.get(now.month, "")
+    day_name = days_map.get(now.weekday(), "Day")
+    month_name = months_map.get(now.month, "")
     date_str = f"{now.day} {month_name}"
-
-    first_name = contact_name.split()[0] if contact_name else "Teman"
+    first_name = contact_name.split()[0] if contact_name else default_name
 
     rendered = template.replace("{name}", contact_name)
     rendered = rendered.replace("{first_name}", first_name)
     rendered = rendered.replace("{time_greeting}", time_greeting)
     rendered = rendered.replace("{day}", day_name)
     rendered = rendered.replace("{date}", date_str)
-
     return rendered.strip()
-
 
 def resolve_caption_for_contact(contact_name: str, group_caption: str = None) -> str:
     cfg = load_config()
@@ -431,25 +686,17 @@ def resolve_caption_for_contact(contact_name: str, group_caption: str = None) ->
     default_cap = cfg.get("default_caption", "🔥")
     return format_caption(default_cap, contact_name)
 
-
-# ==============================================================================
-# Delays, Human Jitter & Safety
-# ==============================================================================
-
 def get_action_delay() -> float:
     return round(random.uniform(2.5, 4.0), 2)
-
 
 def is_within_safe_hours() -> tuple:
     now = datetime.now()
     current_time = (now.hour, now.minute)
     is_safe = (7, 0) <= current_time <= (23, 0)
-    desc = f"{now.hour:02d}:{now.minute:02d} (Aman: 07:00 - 23:00)"
+    desc = f"{now.hour:02d}:{now.minute:02d} (Safe: 07:00 - 23:00)" if CURRENT_LANG == "en" else f"{now.hour:02d}:{now.minute:02d} (Aman: 07:00 - 23:00)"
     return is_safe, desc
 
-
 def wait_for_internet(timeout: int = 180, check_interval: int = 2, verbose: bool = False) -> bool:
-    """Waits for active internet connectivity with animated progress bar."""
     start_time = time.time()
     frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     i = 0
@@ -461,7 +708,7 @@ def wait_for_internet(timeout: int = 180, check_interval: int = 2, verbose: bool
         bar = "█" * filled + "░" * (10 - filled)
 
         if verbose:
-            sys.stdout.write(f"\r[*] Memeriksa koneksi internet... {frames[i % len(frames)]} [{bar}] {int(elapsed)}s/{timeout}s")
+            sys.stdout.write(f"\r[*] {t('wait_internet')}... {frames[i % len(frames)]} [{bar}] {int(elapsed)}s/{timeout}s")
             sys.stdout.flush()
 
         try:
@@ -469,7 +716,7 @@ def wait_for_internet(timeout: int = 180, check_interval: int = 2, verbose: bool
             sock.close()
             if verbose:
                 sys.stdout.write("\r" + " " * 80 + "\r")
-                print(f"[*] Koneksi internet: [Terhubung ✓] ({elapsed:.1f}s)")
+                print(t("internet_connected", elapsed=elapsed))
             return True
         except (socket.timeout, OSError):
             pass
@@ -479,7 +726,7 @@ def wait_for_internet(timeout: int = 180, check_interval: int = 2, verbose: bool
             if r.status_code in (200, 301, 302, 403):
                 if verbose:
                     sys.stdout.write("\r" + " " * 80 + "\r")
-                    print(f"[*] Koneksi internet: [Terhubung via HTTP ✓] ({elapsed:.1f}s)")
+                    print(t("internet_connected_http", elapsed=elapsed))
                 return True
         except Exception:
             pass
@@ -489,7 +736,7 @@ def wait_for_internet(timeout: int = 180, check_interval: int = 2, verbose: bool
 
     if verbose:
         sys.stdout.write("\r" + " " * 80 + "\r")
-        print("[!] Koneksi internet: [Gagal / Batas Waktu Habis]")
+        print(t("internet_failed"))
     return False
 
 # ==============================================================================
@@ -503,7 +750,7 @@ def send_telegram_notification(bot_token: str, chat_id: str, title: str, text: s
         safe_title = html.escape(title)
         safe_text = html.escape(text)
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        msg = f"{icon} <b>{safe_title}</b>\n\n{safe_text}\n\n<i>Waktu: {now_str}</i>"
+        msg = f"{icon} <b>{safe_title}</b>\n\n{safe_text}\n\n<i>Time: {now_str}</i>"
 
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         resp = requests.post(url, json={
@@ -514,379 +761,335 @@ def send_telegram_notification(bot_token: str, chat_id: str, title: str, text: s
 
         data = resp.json()
         if resp.status_code == 200 and data.get("ok"):
-            return True, "Berhasil terkirim ke Telegram!"
+            return True, "Successfully sent to Telegram!"
         else:
             desc = data.get("description", resp.text)
             return False, f"Telegram API Error ({resp.status_code}): {desc}"
     except Exception as e:
-        return False, f"Gagal koneksi Telegram: {e}"
-
+        return False, f"Telegram Connection Error: {e}"
 
 def send_discord_notification(webhook_url: str, title: str, text: str, success: bool) -> tuple:
     try:
-        color = 0x2ECC71 if success else 0xE74C3C
-        payload = {
-            "embeds": [{
-                "title": title,
-                "description": text,
-                "color": color,
-                "timestamp": datetime.utcnow().isoformat()
-            }]
+        color = 0x2ecc71 if success else 0xe74c3c
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        embed = {
+            "title": f"{'✅' if success else '❌'} {title}",
+            "description": text,
+            "color": color,
+            "footer": {"text": f"Snapchat Streak Helper • {now_str}"}
         }
-        resp = requests.post(webhook_url, json=payload, timeout=10)
+        resp = requests.post(webhook_url, json={"embeds": [embed]}, timeout=10)
         if resp.status_code in (200, 204):
-            return True, "Berhasil terkirim ke Discord Webhook!"
+            return True, "Successfully sent to Discord!"
         else:
-            return False, f"Discord Error ({resp.status_code}): {resp.text}"
+            return False, f"Discord Webhook Error ({resp.status_code}): {resp.text}"
     except Exception as e:
-        return False, f"Gagal koneksi Discord: {e}"
+        return False, f"Discord Connection Error: {e}"
 
-
-def send_notification(title: str, text: str, success: bool):
+def send_notification(title: str, text: str, success: bool = True):
     cfg = load_config()
     notifs = cfg.get("notifications", {})
 
-    # 1. macOS native banner
-    if OS_NAME == "Darwin" and notifs.get("macos", {}).get("enabled", True):
-        sound = "default" if success else "Basso"
-        clean_title = title.replace('"', '\\"').replace("\n", " ")
-        clean_text = text.replace("*", "").replace('"', "'").strip()
-        lines = [l.strip() for l in clean_text.splitlines() if l.strip()]
-        short_text = " \\n ".join(lines[:3]) if lines else "Status pengiriman snap streak"
-        if len(short_text) > 200:
-            short_text = short_text[:197] + "..."
-        script = f'display notification "{short_text}" with title "{clean_title}" sound name "{sound}"'
+    if notifs.get("macos", {}).get("enabled", True) and OS_NAME == "Darwin":
         try:
-            subprocess.run(["osascript", "-e", script], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            clean_text = text.replace(chr(34), chr(92) + chr(34)).replace(chr(10), " ")
+            clean_title = title.replace(chr(34), chr(92) + chr(34))
+            osa = f'display notification "{clean_text}" with title "{clean_title}"'
+            subprocess.run(["osascript", "-e", osa], capture_output=True, timeout=5)
         except Exception:
             pass
 
-    # 2. Telegram Bot
     tg = notifs.get("telegram", {})
     if tg.get("enabled") and tg.get("bot_token") and tg.get("chat_id"):
-        ok, err = send_telegram_notification(tg["bot_token"], tg["chat_id"], title, text, success)
-        if not ok:
-            log_message(f"Telegram error: {err}")
+        ok, msg = send_telegram_notification(tg["bot_token"], tg["chat_id"], title, text, success)
+        log_activity("NOTIF", f"Telegram dispatch: {'Success' if ok else 'Failed'} ({msg})")
 
-    # 3. Discord Webhook
     dc = notifs.get("discord", {})
     if dc.get("enabled") and dc.get("webhook_url"):
-        ok, err = send_discord_notification(dc["webhook_url"], title, text, success)
-        if not ok:
-            log_message(f"Discord error: {err}")
-
+        ok, msg = send_discord_notification(dc["webhook_url"], title, text, success)
+        log_activity("NOTIF", f"Discord dispatch: {'Success' if ok else 'Failed'} ({msg})")
 
 # ==============================================================================
-# Auto Scheduler (LaunchAgent on macOS)
+# Auto-Scheduler (macOS LaunchAgent / Windows / Linux)
 # ==============================================================================
 
 def get_scheduler_status() -> tuple:
     cfg = load_config()
     sched = cfg.get("schedule", {"hour": 9, "minute": 0})
-    time_str = f"{sched['hour']:02d}:{sched['minute']:02d}"
+    time_str = f"{sched.get('hour', 9):02d}:{sched.get('minute', 0):02d}"
 
     if OS_NAME == "Darwin":
-        plist = os.path.expanduser("~/Library/LaunchAgents/com.user.snapchatstreak.plist")
+        plist = os.path.expanduser("~/Library/LaunchAgents/com.user.snapchat-streak.plist")
         if os.path.exists(plist):
-            return True, f"Active (macOS LaunchAgent @ {time_str} with Wake-up Catch-up)"
-        return False, "Not Installed"
-    return False, "Unsupported OS"
-
+            res = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
+            if "com.user.snapchat-streak" in res.stdout:
+                return True, t("sched_macos_active", time=time_str)
+            return True, t("sched_macos_loaded")
+        return False, t("sched_not_configured")
+    elif OS_NAME == "Windows":
+        res = subprocess.run(["schtasks", "/Query", "/TN", "SnapchatStreakDaily"], capture_output=True, text=True)
+        if res.returncode == 0:
+            return True, t("sched_win_active")
+        return False, t("sched_not_configured")
+    else:
+        res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if "snapchat-streak" in res.stdout:
+            return True, t("sched_linux_active")
+        return False, t("sched_not_configured")
 
 def install_scheduler():
-    ensure_dirs()
     cfg = load_config()
     sched = cfg.get("schedule", {"hour": 9, "minute": 0})
-    hour = sched.get("hour", 9)
-    minute = sched.get("minute", 0)
+    h = sched.get("hour", 9)
+    m = sched.get("minute", 0)
+    time_str = f"{h:02d}:{m:02d}"
+    script_path = os.path.abspath(__file__)
+    python_bin = sys.executable
 
     if OS_NAME == "Darwin":
-        plist_path = os.path.expanduser("~/Library/LaunchAgents/com.user.snapchatstreak.plist")
-        wrapper_bin = os.path.expanduser("~/.local/bin/snapchat-streak")
+        plist_path = os.path.expanduser("~/Library/LaunchAgents/com.user.snapchat-streak.plist")
+        os.makedirs(os.path.dirname(plist_path), exist_ok=True)
+        log_file = os.path.join(BASE_DIR, "streak.log")
 
-        if not os.path.exists(wrapper_bin):
-            wrapper_bin = sys.executable + " " + os.path.abspath(__file__)
-
-        # Multi-interval hourly catch-up so morning wake-up always triggers
-        intervals_xml = ""
-        for h in range(hour, 22):
-            intervals_xml += f"""        <dict>
+        intervals = []
+        for hour in range(h, 24):
+            intervals.append(f"""        <dict>
             <key>Hour</key>
-            <integer>{h}</integer>
+            <integer>{hour}</integer>
             <key>Minute</key>
-            <integer>{minute}</integer>
-        </dict>\n"""
+            <integer>{m}</integer>
+        </dict>""")
+        intervals_xml = "\n".join(intervals)
 
-        plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+        content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.user.snapchatstreak</string>
+    <string>com.user.snapchat-streak</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{os.path.expanduser('~/.local/bin/snapchat-streak')}</string>
+        <string>{python_bin}</string>
+        <string>{script_path}</string>
         <string>--cron</string>
     </array>
     <key>StartCalendarInterval</key>
     <array>
-{intervals_xml}    </array>
+{intervals_xml}
+    </array>
     <key>StandardOutPath</key>
-    <string>{BASE_DIR}/streak.log</string>
+    <string>{log_file}</string>
     <key>StandardErrorPath</key>
-    <string>{BASE_DIR}/streak.log</string>
+    <string>{log_file}</string>
 </dict>
 </plist>
 """
-        os.makedirs(os.path.dirname(plist_path), exist_ok=True)
         with open(plist_path, "w", encoding="utf-8") as f:
-            f.write(plist_content)
+            f.write(content)
 
-        subprocess.run(["launchctl", "unload", plist_path], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        res = subprocess.run(["launchctl", "load", plist_path], check=False, capture_output=True, text=True)
+        subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
+        subprocess.run(["launchctl", "load", plist_path], check=True)
+        print(t("sched_installed_mac", time=time_str))
+        log_activity("CONFIG", f"Scheduler LaunchAgent installed at {time_str}")
+        return True
+
+    elif OS_NAME == "Windows":
+        cmd = [
+            "schtasks", "/Create", "/SC", "DAILY", "/TN", "SnapchatStreakDaily",
+            "/TR", f'"{python_bin}" "{script_path}" --cron',
+            "/ST", time_str, "/F"
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode == 0:
-            log_activity("CONFIG", f"Jadwal harian diaktifkan pada jam {hour:02d}:{minute:02d} (dengan multi-interval catch-up).")
-            print(f"[✓] Berhasil memasang jadwal otomatis jam {hour:02d}:{minute:02d} (Wake-up Catch-up aktif)!")
-        else:
-            print(f"[!] Gagal mendaftarkan LaunchAgent: {res.stderr}")
-    else:
-        print("[!] Scheduler otomatis saat ini dioptimalkan untuk macOS LaunchAgent.")
+            print(t("sched_installed_win", time=time_str))
+            log_activity("CONFIG", f"Windows Task Scheduler installed at {time_str}")
+            return True
+        return False
 
+    elif OS_NAME == "Linux":
+        res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        existing = res.stdout if res.returncode == 0 else ""
+        filtered = [l for l in existing.splitlines() if "snapchat-streak" not in l]
+        filtered.append(f"{m} {h} * * * {python_bin} {script_path} --cron >> {os.path.join(BASE_DIR, 'streak.log')} 2>&1")
+        new_cron = "\n".join(filtered) + "\n"
+        p = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
+        p.communicate(input=new_cron)
+        print(t("sched_installed_linux", time=time_str))
+        log_activity("CONFIG", f"Linux Crontab installed at {time_str}")
+        return True
+
+    return False
 
 def remove_scheduler():
     if OS_NAME == "Darwin":
-        plist_path = os.path.expanduser("~/Library/LaunchAgents/com.user.snapchatstreak.plist")
+        plist_path = os.path.expanduser("~/Library/LaunchAgents/com.user.snapchat-streak.plist")
         if os.path.exists(plist_path):
-            subprocess.run(["launchctl", "unload", plist_path], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            try:
-                os.remove(plist_path)
-            except Exception:
-                pass
-            log_activity("CONFIG", "Jadwal harian dinonaktifkan.")
-            print("[✓] Jadwal otomatis berhasil dihapus.")
-        else:
-            print("[i] Tidak ada jadwal yang terpasang.")
-
+            subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
+            os.remove(plist_path)
+            print(t("sched_removed_mac"))
+            log_activity("CONFIG", "macOS LaunchAgent removed")
+            return True
+    elif OS_NAME == "Windows":
+        res = subprocess.run(["schtasks", "/Delete", "/TN", "SnapchatStreakDaily", "/F"], capture_output=True, text=True)
+        if res.returncode == 0:
+            print(t("sched_removed_win"))
+            log_activity("CONFIG", "Windows Task Scheduler removed")
+            return True
+    elif OS_NAME == "Linux":
+        res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if res.returncode == 0:
+            filtered = [l for l in res.stdout.splitlines() if "snapchat-streak" not in l]
+            new_cron = "\n".join(filtered) + "\n"
+            p = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
+            p.communicate(input=new_cron)
+            print(t("sched_removed_linux"))
+            log_activity("CONFIG", "Linux Crontab removed")
+            return True
+    return False
 
 # ==============================================================================
-# Playwright Browser Helper
+# Browser & Automation Engine (Playwright)
 # ==============================================================================
-
-BROWSER_ARGS = [
-    "--use-fake-ui-for-media-stream",
-    "--use-fake-device-for-media-stream",
-    "--disable-blink-features=AutomationControlled",
-    "--no-sandbox",
-    "--disable-dev-shm-usage"
-]
-
-
-def create_snap_canvas_image():
-    """Generates a dummy or branded dark snap frame if camera upload is used."""
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-        img = Image.new("RGB", (720, 1280), color=(18, 18, 24))
-        draw = ImageDraw.Draw(img)
-        # Add flame accent or minimal graphics
-        draw.ellipse([310, 590, 410, 690], fill=(255, 140, 0))
-        img.save(TEMP_SNAP_IMAGE)
-        return TEMP_SNAP_IMAGE
-    except Exception:
-        return None
-
 
 def save_auth_session(context) -> bool:
-    """Saves complete authentication session including session cookies and localStorage to storage_state.json."""
     try:
         ensure_dirs()
         context.storage_state(path=STORAGE_STATE_FILE)
-        log_activity("AUTH", "Sesi login berhasil disimpan ke storage_state.json.")
+        log_activity("AUTH", "Auth session saved to storage_state.json.")
         return True
     except Exception as e:
-        log_activity("ERROR", f"Gagal menyimpan session state: {e}")
+        log_activity("ERROR", f"Failed to save auth state: {e}")
         return False
-
 
 def restore_auth_session(context) -> bool:
-    """Restores session cookies and localStorage from storage_state.json into the browser context."""
-    if not os.path.exists(STORAGE_STATE_FILE):
-        return False
-    try:
-        with open(STORAGE_STATE_FILE, "r", encoding="utf-8") as f:
-            state = json.load(f)
-
-        # 1. Restore all cookies (including session cookies)
-        cookies = state.get("cookies", [])
-        if cookies:
-            context.add_cookies(cookies)
-
-        # 2. Restore localStorage per origin
-        for orig in state.get("origins", []):
-            origin_url = orig.get("origin", "")
-            ls_items = orig.get("localStorage", [])
-            if ls_items and origin_url:
-                ls_json = json.dumps({item["name"]: item["value"] for item in ls_items})
-                script = f"""
-                    if (window.location.origin === '{origin_url}') {{
-                        const data = {ls_json};
-                        for (const [k, v] of Object.entries(data)) {{
-                            localStorage.setItem(k, v);
-                        }}
-                    }}
-                """
-                context.add_init_script(script)
-        return True
-    except Exception as e:
-        log_activity("ERROR", f"Gagal memulihkan session state: {e}")
-        return False
-
-
-def launch_browser_context(p, headless: bool = True):
-    """
-    Launches Playwright persistent context with 4-tier auto-recovery:
-    1. Bundled Playwright Chromium / Headless Shell
-    2. Local Google Chrome (channel='chrome')
-    3. Local Microsoft Edge (channel='msedge')
-    4. Auto-repair (auto-installs missing Chromium binary via CLI and retries)
-    Includes stealth anti-detection and automatic session restoration.
-    """
-    ensure_dirs()
-    args = list(BROWSER_ARGS)
-    if headless:
-        args.append("--headless=new")
-
-    opts = {
-        "user_data_dir": PROFILE_DIR,
-        "headless": headless,
-        "args": args,
-        "ignore_default_args": ["--enable-automation"],
-        "permissions": ["camera", "microphone"],
-        "viewport": {"width": 1440, "height": 900},
-        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-    }
-
-    def setup_context(ctx):
-        ctx.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            window.navigator.chrome = { runtime: {} };
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        """)
-        restore_auth_session(ctx)
-        return ctx
-
-    # Tier 1: Default Playwright Chromium
-    try:
-        ctx = p.chromium.launch_persistent_context(**opts)
-        return setup_context(ctx)
-    except Exception as e1:
-        log_activity("SYSTEM", f"Chromium default launch gagal ({e1}). Mencoba fallback ke Google Chrome lokal...")
-
-    # Tier 2: Local Google Chrome
-    try:
-        opts_chrome = dict(opts)
-        opts_chrome["channel"] = "chrome"
-        ctx = p.chromium.launch_persistent_context(**opts_chrome)
-        return setup_context(ctx)
-    except Exception as e2:
-        log_activity("SYSTEM", f"Google Chrome lokal gagal ({e2}). Mencoba fallback ke Microsoft Edge...")
-
-    # Tier 3: Local Microsoft Edge
-    try:
-        opts_edge = dict(opts)
-        opts_edge["channel"] = "msedge"
-        ctx = p.chromium.launch_persistent_context(**opts_edge)
-        return setup_context(ctx)
-    except Exception:
-        pass
-
-    # Tier 4: Self-Healing Auto-Repair
-    log_activity("SYSTEM", "Mencoba auto-repair: Mengunduh Playwright Chromium di latar belakang...")
-    try:
-        subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=180,
-            check=False
-        )
-        ctx = p.chromium.launch_persistent_context(**opts)
-        return setup_context(ctx)
-    except Exception as e_final:
-        raise RuntimeError(f"Gagal meluncurkan browser Playwright setelah 4 metode pemulihan dicoba: {e_final}")
-
-
-# ==============================================================================
-# Login & Authentication Verification
-# ==============================================================================
-
-def is_page_logged_in(page) -> bool:
-    """Verifies whether the current page is authenticated on Snapchat Web."""
-    try:
-        url = page.url.lower()
-        if "accounts.snapchat.com" in url or "original_referrer" in url:
-            return False
-
-        # If password or identifier input is visible, user is definitely not logged in
-        for sel in ['input[type="password"]', 'input[name="accountIdentifier"]', 'button:has-text("Log in")', 'button:has-text("Log In")']:
-            if page.locator(sel).first.is_visible(timeout=300):
-                return False
-
-        try:
-            body_text = page.locator("body").inner_text(timeout=1000).lower()
-            if "log in to snapchat" in body_text or "browser not supported" in body_text:
-                return False
-        except Exception:
-            pass
-
-        # If chat feed or conversation list or camera button is visible
-        for chat_sel in [
-            '[aria-label="Friends Feed"]', 
-            '.ReactVirtualized__Grid', 
-            '[role="listitem"]', 
-            '[data-testid*="chat"]', 
-            '[aria-label*="Chat"]', 
-            'button[aria-label*="Camera"]'
-        ]:
-            if page.locator(chat_sel).first.is_visible(timeout=400):
-                return True
-
-        if "web.snapchat.com" in url or "snapchat.com/web" in url:
-            return True
-
-        return False
-    except Exception:
-        return False
-
-
-def check_login_status() -> bool:
-    """Instant (1ms) check for authentic Snapchat login session via storage_state.json or SQLite database."""
-    # 1. Check storage_state.json first
     if os.path.exists(STORAGE_STATE_FILE):
         try:
             with open(STORAGE_STATE_FILE, "r", encoding="utf-8") as f:
                 state = json.load(f)
             cookies = state.get("cookies", [])
+            if cookies:
+                context.add_cookies(cookies)
+                return True
+        except Exception:
+            pass
+    return False
+
+def launch_browser_context(p, headless: bool = True):
+    ensure_dirs()
+    user_agent = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    )
+
+    storage = STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None
+
+    launch_args = [
+        "--disable-blink-features=AutomationControlled",
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--allow-running-insecure-content",
+        "--disable-web-security"
+    ]
+
+    def setup_context(ctx):
+        ctx.set_default_timeout(30000)
+        ctx.grant_permissions(["camera", "microphone", "notifications"], origin="https://web.snapchat.com")
+        ctx.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            window.chrome = { runtime: {} };
+        """)
+        return ctx
+
+    try:
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=PROFILE_DIR,
+            headless=headless,
+            viewport={"width": 1440, "height": 900},
+            user_agent=user_agent,
+            args=launch_args,
+            storage_state=storage
+        )
+        return setup_context(context)
+    except Exception:
+        pass
+
+    try:
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=PROFILE_DIR,
+            channel="chrome",
+            headless=headless,
+            viewport={"width": 1440, "height": 900},
+            user_agent=user_agent,
+            args=launch_args,
+            storage_state=storage
+        )
+        return setup_context(context)
+    except Exception:
+        pass
+
+    try:
+        browser = p.chromium.launch(
+            headless=headless,
+            args=launch_args
+        )
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            user_agent=user_agent,
+            storage_state=storage
+        )
+        restore_auth_session(context)
+        return setup_context(context)
+    except Exception as e:
+        raise RuntimeError(f"Could not launch browser: {e}")
+
+def is_page_logged_in(page) -> bool:
+    try:
+        current_url = page.url.lower()
+        if "accounts.snapchat.com/v2/login" in current_url:
+            return False
+
+        login_button = page.locator("button:has-text('Log In'), a:has-text('Log In')")
+        if login_button.count() > 0:
+            for i in range(login_button.count()):
+                if login_button.nth(i).is_visible():
+                    return False
+
+        chat_indicators = [
+            '[aria-label="Friends Feed"]',
+            '[aria-label="Chat"]',
+            'nav',
+            'button.fE2D5',
+            'button.qJKfS'
+        ]
+        for sel in chat_indicators:
+            if page.locator(sel).first.is_visible(timeout=1000):
+                return True
+
+        if "web.snapchat.com" in current_url:
+            return True
+        return False
+    except Exception:
+        return False
+
+def check_login_status() -> bool:
+    if os.path.exists(STORAGE_STATE_FILE):
+        try:
+            with open(STORAGE_STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            cookies = data.get("cookies", [])
             for c in cookies:
-                name = c.get("name", "")
-                domain = c.get("domain", "")
-                if "snapchat" in domain:
-                    if (
-                        name.startswith("sc-a-") 
-                        or ("session" in name.lower() and "blizzard" not in name.lower()) 
-                        or "auth" in name.lower() 
-                        or "sastate" in name.lower()
-                    ):
+                if "snapchat" in c.get("domain", ""):
+                    name = c.get("name", "").lower()
+                    if "sc-a-" in name or ("session" in name and "blizzard" not in name) or "auth" in name or "sastate" in name:
                         return True
         except Exception:
             pass
 
-    # 2. Check SQLite Cookies database
-    if not os.path.exists(PROFILE_DIR):
-        return False
     cookie_paths = [
-        os.path.join(PROFILE_DIR, "Default", "Cookies"),
         os.path.join(PROFILE_DIR, "Default", "Network", "Cookies"),
+        os.path.join(PROFILE_DIR, "Default", "Cookies"),
         os.path.join(PROFILE_DIR, "Cookies")
     ]
     for p in cookie_paths:
@@ -914,49 +1117,20 @@ def check_login_status() -> bool:
                 pass
     return False
 
-
-def verify_login_live(verbose: bool = True) -> bool:
-    """Full live verification by launching browser to check active session."""
-    def worker():
-        with sync_playwright() as p:
-            ctx = launch_browser_context(p, headless=True)
-            pg = ctx.new_page()
-            pg.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded", timeout=25000)
-            pg.wait_for_timeout(3500)
-            is_valid = is_page_logged_in(pg)
-            ctx.close()
-            return is_valid
-
-    if verbose:
-        res, _ = run_with_progress("Memverifikasi sesi langsung ke Snapchat Web", worker, timeout=18.0)
-        return bool(res)
-    else:
-        try:
-            return bool(worker())
-        except Exception:
-            return False
-
-
 def interactive_login():
     ensure_dirs()
     print("\n" + "=" * 68)
-    print("🔑 LOGIN / HUBUNGKAN AKUN SNAPCHAT (BROWSER RESMI)")
+    print(t("login_title"))
     print("=" * 68)
-    print("1. Jendela browser resmi akan terbuka langsung ke Snapchat Web.")
-    print("2. Masukkan Username / Email / Nomor HP dan Password Anda.")
-    print("3. Jika diminta verifikasi 2FA atau notifikasi di aplikasi HP, silakan setujui.")
-    print("4. Pastikan Anda sudah melihat halaman obrolan / daftar Chat di browser.")
-    print("5. KEMBALI KE TERMINAL INI dan tekan [ENTER].")
-    print("   👉 Jendela browser akan ditutup otomatis oleh script (jangan tutup manual).")
+    print(t("login_step_1"))
+    print(t("login_step_2"))
+    print(t("login_step_3"))
+    print(t("login_step_4"))
+    print(t("login_step_5"))
+    print(t("login_step_5_sub"))
     print("=" * 68 + "\n")
 
-    input("Tekan [ENTER] untuk membuka jendela browser login...")
-
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        print("[!] Modul 'playwright' belum terpasang.")
-        return
+    input(t("login_press_enter"))
 
     import threading
     login_confirmed = False
@@ -969,11 +1143,9 @@ def interactive_login():
         except Exception:
             pass
 
-        print("\n[*] Jendela browser telah terbuka.")
-        print("[*] Silakan login akun Snapchat Anda di browser tersebut.")
+        print(t("login_browser_opened"))
+        print(t("login_browser_hint"))
 
-        # Background auto-save monitor: automatically captures and saves session
-        # as soon as the user completes login, even before they press ENTER!
         stop_monitor = False
         def monitor_worker():
             while not stop_monitor:
@@ -987,10 +1159,9 @@ def interactive_login():
         mon_thread = threading.Thread(target=monitor_worker, daemon=True)
         mon_thread.start()
 
-        input("\n👉 Setelah Anda SUDAH SELESAI LOGIN dan melihat halaman obrolan/Chat di browser, tekan [ENTER] di sini...\n   (Browser akan ditutup otomatis oleh script, jangan ditutup manual)")
+        input(t("login_wait_confirm"))
         stop_monitor = True
 
-        # Final save while browser is still open
         try:
             if not page.is_closed():
                 time.sleep(1)
@@ -1000,7 +1171,6 @@ def interactive_login():
         except Exception:
             pass
 
-        # Check cookies before closing
         try:
             cookies = context.cookies()
             has_auth = any(
@@ -1018,43 +1188,40 @@ def interactive_login():
         except Exception:
             pass
 
-    # Check status
     if not login_confirmed:
         login_confirmed = check_login_status()
 
     if login_confirmed:
-        print("\n[✓] Login BERHASIL! Sesi akun tersimpan rapi di komputer.")
-        log_activity("AUTH", "Login Snapchat berhasil disimpan dan terverifikasi.")
-        print("[*] Memulai pemindaian daftar teman dari akun yang terhubung...")
+        print(t("login_success"))
+        log_activity("AUTH", "Snapchat login successful and verified.")
         scan_snapchat_friends(verbose=True)
     else:
-        print("\n[!] Perhatian: Belum terdeteksi sesi login aktif.")
-        print("    Pastikan Anda sudah menyelesaikan proses login sampai halaman Chat sebelum menekan [ENTER].")
-        print("    Silakan coba lagi dari menu Login.")
-
+        print(t("login_failed_prompt"))
 
 def logout_snapchat(verbose: bool = True) -> bool:
-    """Completely logs out: removes saved session, browser profile, and resets cached contacts."""
     try:
-        import shutil
         if os.path.exists(STORAGE_STATE_FILE):
             os.remove(STORAGE_STATE_FILE)
         if os.path.exists(PROFILE_DIR):
             shutil.rmtree(PROFILE_DIR, ignore_errors=True)
+            os.makedirs(PROFILE_DIR, exist_ok=True)
+
         cfg = load_config()
         cfg["contacts"] = []
         cfg["streak_data"] = {}
+        for g_name in cfg.get("groups", {}):
+            cfg["groups"][g_name]["members"] = []
         save_config(cfg)
-        log_activity("AUTH", "Sesi login Snapchat dan cache kontak berhasil dibersihkan (Logout).")
+
+        log_activity("AUTH", "User logged out. Session and friends cache cleared.")
         if verbose:
-            print("\n[✓] Berhasil logout! Sesi akun dan cache teman telah dibersihkan.\n")
+            print(t("logout_success"))
         return True
     except Exception as e:
-        log_activity("ERROR", f"Gagal logout: {e}")
+        log_activity("ERROR", f"Logout error: {e}")
         if verbose:
-            print(f"\n[!] Gagal logout: {e}\n")
+            print(t("logout_failed", err=e))
         return False
-
 
 # ==============================================================================
 # Friends & Streak Scanning Engine
@@ -1067,9 +1234,12 @@ def scan_snapchat_friends_using_page(page, verbose: bool = True) -> list:
     streak_data = cfg.get("streak_data", {})
 
     if verbose:
-        print("[*] Memindai daftar teman dan status streak di Snapchat Web...")
+        print(t("scan_starting"))
 
-    page.wait_for_timeout(4000)
+    try:
+        page.wait_for_timeout(4000)
+    except Exception:
+        return []
 
     ignore_names = {
         "chat", "new chat", "camera", "search", "stories", "spotlight", 
@@ -1080,73 +1250,73 @@ def scan_snapchat_friends_using_page(page, verbose: bool = True) -> list:
         "learn more about enabling notifications", "team snapchat"
     }
 
-    # Scroll up to top of friend feed first if possible
-    feed = page.locator('[aria-label="Friends Feed"], .ReactVirtualized__Grid').first
-    if feed.is_visible(timeout=2000):
-        try:
-            feed.evaluate("el => el.scrollTop = 0")
-        except Exception:
-            pass
-    page.wait_for_timeout(1000)
-
-    # Incrementally scroll down and accumulate friends across virtualized grid render cycles
-    for _ in range(16):
-        rows = page.locator('[role="listitem"]')
-        count = rows.count()
-        for i in range(count):
+    try:
+        feed = page.locator('[aria-label="Friends Feed"], .ReactVirtualized__Grid').first
+        if feed.is_visible(timeout=2000):
             try:
-                txt = rows.nth(i).inner_text().strip()
-                if not txt:
-                    continue
-                lines = [l.strip() for l in txt.split("\n") if l.strip()]
-                if not lines:
-                    continue
-                # Line 0 might be an emoji avatar or notification badge (e.g. "😊", "🔥", "1", "2")
-                name = lines[1] if (len(lines[0]) <= 2 or lines[0] in ["😊", "🔥", "1", "2"]) and len(lines) > 1 else lines[0]
-                if name.lower() in ignore_names or len(name) > 35:
-                    continue
-                has_streak = "🔥" in txt
-                m = re.search(r"(\d+)\s*🔥", txt)
-                st_count = m.group(1) if m else ""
-                
-                if name not in found_contacts:
-                    found_contacts.append(name)
-                    if st_count:
-                        streak_data[name] = st_count
-                    if verbose:
-                        badge = f" ({st_count} 🔥)" if st_count else (" 🔥" if has_streak else "")
-                        print(f"  • {name}{badge}")
+                feed.evaluate("el => el.scrollTop = 0")
             except Exception:
-                continue
+                pass
+        page.wait_for_timeout(1000)
 
-        # Scroll down
-        if feed.is_visible(timeout=500):
-            feed.evaluate("el => el.scrollTop += 600")
-        else:
-            page.mouse.wheel(0, 600)
-        page.wait_for_timeout(400)
+        for _ in range(16):
+            if page.is_closed():
+                break
+            rows = page.locator('[role="listitem"]')
+            count = rows.count()
+            for i in range(count):
+                try:
+                    txt = rows.nth(i).inner_text().strip()
+                    if not txt:
+                        continue
+                    lines = [l.strip() for l in txt.split("\n") if l.strip()]
+                    if not lines:
+                        continue
+                    name = lines[1] if (len(lines[0]) <= 2 or lines[0] in ["😊", "🔥", "1", "2"]) and len(lines) > 1 else lines[0]
+                    if name.lower() in ignore_names or len(name) > 35:
+                        continue
+                    has_streak = "🔥" in txt
+                    m = re.search(r"(\d+)\s*🔥", txt)
+                    st_count = m.group(1) if m else ""
+                    
+                    if name not in found_contacts:
+                        found_contacts.append(name)
+                        if st_count:
+                            streak_data[name] = st_count
+                        if verbose:
+                            badge = f" ({st_count} 🔥)" if st_count else (" 🔥" if has_streak else "")
+                            print(f"  • {name}{badge}")
+                except Exception:
+                    continue
+
+            if feed.is_visible(timeout=500):
+                feed.evaluate("el => el.scrollTop += 600")
+            else:
+                page.mouse.wheel(0, 600)
+            page.wait_for_timeout(400)
+
+    except Exception as e:
+        if verbose:
+            print(t("scan_error", err=e))
 
     if found_contacts:
         merged = sorted(list(set(existing_contacts + found_contacts)))
         cfg["contacts"] = merged
         cfg["streak_data"] = streak_data
         save_config(cfg)
-        log_activity("JOB", f"Pindai kontak selesai: ditemukan {len(found_contacts)} teman.")
+        log_activity("JOB", f"Contact scan completed: found {len(found_contacts)} friends.")
         if verbose:
-            print(f"\n[✓] Berhasil menyimpan {len(merged)} teman ke daftar kontak.\n")
+            print(t("scan_found_summary", count=len(merged)))
     else:
         if verbose:
-            print("[-] Tidak ada percakapan teman yang terdeteksi secara otomatis.")
-            print("    Pastikan Anda sudah login dan membuka tab Chat di Snapchat Web.")
+            print(t("scan_none_detected"))
 
     return found_contacts
-
 
 def scan_snapchat_friends(verbose: bool = True) -> list:
     if not check_login_status():
         if verbose:
-            print("\n[!] Akun Snapchat Anda belum terhubung (Sesi Kosong).")
-            print("    👉 Silakan pilih menu [🔑 Login / Hubungkan Akun] terlebih dahulu untuk login.")
+            print(t("scan_not_connected"))
         return []
 
     with sync_playwright() as p:
@@ -1158,8 +1328,7 @@ def scan_snapchat_friends(verbose: bool = True) -> list:
 
             if not is_page_logged_in(page):
                 if verbose:
-                    print("\n[!] Sesi akun Snapchat kedaluwarsa atau belum login.")
-                    print("    👉 Silakan pilih menu [🔑 Login / Hubungkan Akun] untuk login ulang.")
+                    print(t("scan_session_expired"))
                 context.close()
                 return []
 
@@ -1168,25 +1337,20 @@ def scan_snapchat_friends(verbose: bool = True) -> list:
             return res
         except Exception as e:
             if verbose:
-                print(f"[!] Gagal memindai kontak: {e}")
+                print(t("scan_error", err=e))
             return []
-
 
 # ==============================================================================
 # Snap Sending Engine (Camera Capture & Dispatch)
 # ==============================================================================
 
 def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") -> tuple:
-    """Takes a snap using camera shutter and dispatches to recipients. Returns (sent: list, failed: list)."""
     sent = []
     failed = []
 
     try:
-        # Step 1: Ensure camera interface is open and active
-        # Allow video feed / WebRTC to stabilize
         page.wait_for_timeout(3000)
 
-        # Step 2 & 4: Shutter and advance to Send To (with retry loop)
         send_to_btn = None
         for attempt in range(1, 4):
             shutter = page.locator("button.fE2D5, button.gK0xL, button[class*='fE2D5'], button[class*='gK0xL']").first
@@ -1197,7 +1361,6 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
                     page.wait_for_timeout(2500)
                 shutter = page.locator("button.fE2D5, button.gK0xL, button[class*='fE2D5'], button[class*='gK0xL']").first
 
-            # Click shutter
             if shutter.is_visible(timeout=2000):
                 shutter.click()
             else:
@@ -1205,7 +1368,6 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
 
             page.wait_for_timeout(2500)
 
-            # Check if Send To appeared
             candidate = page.locator("button:has-text('Send To'), button.fGS78").first
             try:
                 if candidate.is_visible(timeout=3000):
@@ -1214,10 +1376,9 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
             except Exception:
                 pass
 
-            log_activity("DEBUG", f"Shutter percobaan ke-{attempt} belum memunculkan 'Send To', mencoba lagi...")
+            log_activity("DEBUG", f"Shutter attempt #{attempt} waiting for 'Send To'...")
             page.wait_for_timeout(2000)
 
-        # Step 3: Add Caption (if provided)
         if caption_text and send_to_btn:
             try:
                 cap_btn = page.locator("button[title='Add a caption'], button.xHw7V:has-text('T'), button:has-text('T')").first
@@ -1230,15 +1391,12 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
             except Exception as e:
                 log_activity("DEBUG", f"Caption add skipped/failed: {e}")
 
-        # Step 4: Click 'Send To' button
         if send_to_btn and send_to_btn.is_visible(timeout=3000):
             send_to_btn.click()
             page.wait_for_timeout(2500)
         else:
-            raise RuntimeError("Tombol 'Send To' tidak ditemukan setelah 3 percobaan jepret kamera.")
+            raise RuntimeError("Button 'Send To' not found after 3 camera shutter attempts.")
 
-        # Step 5: Select Recipients in modal
-        # Method A: Use 'Streak' shortcut pill if available
         selected_via_shortcut = False
         streak_pill = page.locator("button:has-text('Streak')").first
         if streak_pill.is_visible(timeout=2500):
@@ -1250,7 +1408,6 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
                 page.wait_for_timeout(1500)
                 selected_via_shortcut = True
 
-        # Method B: Search or click individual recipients in modal
         if not selected_via_shortcut:
             modal_container = page.locator(".Zoysu, .SZJHC, form.tvul8").first
             modal_search = modal_container.locator("input").first
@@ -1277,24 +1434,22 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
                 except Exception:
                     failed.append(target)
 
-        # Step 6: Click Final Blue Send Button
         send_btn = page.locator("button:has-text('Send'):not(:has-text('Send To')), button.TYX6O").first
         if send_btn.is_visible(timeout=4000):
             send_btn.click()
             page.wait_for_timeout(4000)
             if selected_via_shortcut:
                 sent = list(recipient_names)
-            log_activity("JOB", f"Snap berhasil dikirim ke {len(sent)} kontak.")
+            log_activity("JOB", f"Snap dispatched to {len(sent)} contacts.")
         else:
-            raise RuntimeError("Tombol final 'Send' tidak aktif atau tidak ditemukan di antarmuka penerima.")
+            raise RuntimeError("Final 'Send' button not active or not found in modal.")
 
     except Exception as e:
-        log_activity("JOB", f"Error saat eksekusi take_and_send_snap: {e}")
+        log_activity("JOB", f"Error during take_and_send_snap: {e}")
         failed = [r for r in recipient_names if r not in sent]
         sent = []
 
     return sent, failed
-
 
 def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
     ensure_dirs()
@@ -1302,12 +1457,10 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
     today_str = datetime.now().strftime("%Y-%m-%d")
     state = load_state()
 
-    # Avoid duplicate daily sends
     if not force and state.get("last_date") == today_str and state.get("success"):
-        msg = f"Streak hari ini ({today_str}) sudah terkirim pada {state.get('last_time')}."
+        msg = t("streak_skipped_today", date=today_str, time=state.get('last_time'))
         if verbose:
             print(f"\n[i] {msg}")
-            print("    Gunakan opsi paksa atau tunggu jadwal berikutnya.")
         return {"status": "skipped", "message": msg}
 
     cfg = load_config()
@@ -1316,7 +1469,6 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
     groups = cfg.get("groups", {})
     excludes = cfg.get("select_all", {}).get("exclude", [])
 
-    # Filter recipients
     target_recipients = []
     if mode == "all":
         target_recipients = [c for c in contacts if c not in excludes]
@@ -1327,22 +1479,21 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
                     target_recipients.append(m)
 
     if not target_recipients:
-        msg = "Tidak ada kontak target yang dipilih. Silakan Pindai Kontak atau tentukan Grup di Menu 2."
+        msg = t("streak_no_targets")
         if verbose:
             print(f"\n[!] {msg}")
         return {"status": "no_targets", "message": msg}
 
-    # Ensure internet
     if not wait_for_internet(timeout=180, verbose=verbose):
-        err = "Gagal terhubung ke internet dalam batas waktu toleransi."
+        err = t("streak_offline")
         log_activity("JOB", err)
-        send_notification("Snapchat Streak Gagal", err, success=False)
+        send_notification(t("notif_streak_fail_title"), err, success=False)
         return {"status": "offline", "message": err}
 
     if verbose:
         print("\n" + "=" * 65)
-        print(f"🚀 MEMULAI PENGIRIMAN SNAP STREAK ({len(target_recipients)} Kontak)")
-        print(f"   Mode: {mode.upper()} | Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(t("streak_starting_banner", count=len(target_recipients)))
+        print(f"   Mode: {mode.upper()} | Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("=" * 65)
 
     with sync_playwright() as p:
@@ -1352,36 +1503,33 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
             page.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(5000)
 
-            # Check if login active
             if not is_page_logged_in(page):
-                err_msg = "Sesi login Snapchat kedaluwarsa atau belum login. Silakan login via menu terminal."
+                err_msg = t("streak_session_expired")
                 log_activity("JOB", err_msg)
                 save_state(False, 0, len(target_recipients), err_msg)
-                send_notification("Snapchat Streak Gagal", err_msg, success=False)
+                send_notification(t("notif_streak_fail_title"), err_msg, success=False)
                 context.close()
                 return {"status": "error", "message": err_msg}
 
-            # Take snap and send
             default_cap = cfg.get("default_caption", "🔥")
-            resolved_cap = format_caption(default_cap, target_recipients[0] if target_recipients else "Teman")
+            resolved_cap = format_caption(default_cap, target_recipients[0] if target_recipients else ("Friend" if CURRENT_LANG == "en" else "Teman"))
 
             sent, failed = take_and_send_snap(page, target_recipients, caption_text=resolved_cap)
             context.close()
 
             success = len(sent) > 0 and len(failed) == 0
-            summary = f"Terkirim: {len(sent)} | Gagal: {len(failed)}"
+            summary = f"Sent: {len(sent)} | Failed: {len(failed)}" if CURRENT_LANG == "en" else f"Terkirim: {len(sent)} | Gagal: {len(failed)}"
 
             save_state(success, len(sent), len(failed), summary)
-            log_activity("JOB", f"Eksekusi streak selesai. {summary}")
+            log_activity("JOB", f"Streak execution completed. {summary}")
 
-            # Send notifications
             names_preview = ", ".join(sent[:4]) + ("..." if len(sent) > 4 else "")
-            notif_text = f"Terkirim: {len(sent)} | Gagal: {len(failed)}\nPenerima: {names_preview or 'None'}"
-            send_notification("Snapchat Streak Berhasil" if success else "Snapchat Streak Gagal", notif_text, success=success)
+            notif_text = f"Sent: {len(sent)} | Failed: {len(failed)}\nRecipients: {names_preview or 'None'}"
+            send_notification(t("notif_streak_success_title") if success else t("notif_streak_fail_title"), notif_text, success=success)
 
             if verbose:
                 print("\n" + "=" * 65)
-                print(f"🏁 HASIL EKSEKUSI SNAP STREAK: {summary}")
+                print(t("streak_exec_result", summary=summary))
                 print("=" * 65 + "\n")
 
             if success:
@@ -1390,14 +1538,13 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
                 return {"status": "error", "sent": len(sent), "failed": len(failed), "message": summary}
 
         except Exception as e:
-            err_msg = f"Terjadi kesalahan Playwright: {e}"
+            err_msg = f"Playwright Exception: {e}"
             log_activity("JOB", err_msg)
             save_state(False, 0, len(target_recipients), err_msg)
-            send_notification("Snapchat Streak Error", err_msg, success=False)
+            send_notification(t("notif_streak_fail_title"), err_msg, success=False)
             if verbose:
                 print(f"\n[!] {err_msg}\n")
             return {"status": "error", "message": err_msg}
-
 
 # ==============================================================================
 # UI Dashboard & Menus
@@ -1409,368 +1556,378 @@ def print_dashboard():
     state = load_state()
     today_str = datetime.now().strftime("%Y-%m-%d")
 
-    mode_label = "Select All (Semua Teman)" if cfg.get("mode") == "all" else "Groups / Labeling"
+    mode_label = t("dash_mode_all") if cfg.get("mode") == "all" else t("dash_mode_groups")
     sched_active, sched_desc = get_scheduler_status()
 
     is_logged_in = check_login_status()
-    login_badge = "🟢 VALID (Aktif)" if is_logged_in else "🔴 BELUM LOGIN"
+    login_badge = t("dash_status_valid") if is_logged_in else t("dash_status_unauthed")
 
-    status_today = " ⌛ Belum Terkirim Hari Ini"
+    status_today = t("dash_today_pending")
     if state.get("last_date") == today_str:
-        status_today = " 🟢 Sudah Terkirim Hari Ini" if state.get("success") else " 🔴 Gagal Hari Ini"
+        status_today = t("dash_today_sent") if state.get("success") else t("dash_today_failed")
 
     sched_badge = "🟢 " + sched_desc if sched_active else "⚪ " + sched_desc
 
     print("==================================================================")
-    print("👻 Snapchat Streak Auto-Saver & Helper Hub")
+    print(t("dash_title"))
     print("==================================================================")
-    print(f"👤 Akun Sesi      : {login_badge}")
-    print(f"📅 Status Hari Ini:{status_today}")
-    print(f"👥 Mode Penerima  : {mode_label}")
-    print(f"⏰ Jadwal Auto    : {sched_badge}")
+    print(f"{t('dash_account_status')}{login_badge}")
+    print(f"{t('dash_today_status')}{status_today}")
+    print(f"{t('dash_recipient_mode')}{mode_label}")
+    print(f"{t('dash_schedule')}{sched_badge}")
     print("==================================================================")
 
     if not is_logged_in:
         print("\n" + "╔" + "═" * 64 + "╗")
-        print("║  ⚠️  STATUS AKUN: BELUM LOGIN / SESI KOSONG                    ║")
-        print("║  👉 Anda belum menghubungkan akun Snapchat. Otomasi streak    ║")
-        print("║     tidak dapat berjalan sebelum Anda login terlebih dahulu.   ║")
+        print(f"║  {t('dash_warn_unauthed_title'):<60}  ║")
+        print(f"║  {t('dash_warn_unauthed_desc1'):<60}  ║")
+        print(f"║  {t('dash_warn_unauthed_desc2'):<60}  ║")
         print("║                                                                ║")
-        print("║  👉 Silakan pilih menu [🔑 LOGIN SEKARANG] di bawah ini!       ║")
+        print(f"║  {t('dash_warn_unauthed_desc3'):<60}  ║")
         print("╚" + "═" * 64 + "╝\n")
-
 
 def menu_manage_recipients():
     while True:
         cfg = load_config()
         mode = cfg.get("mode", "all")
-        mode_label = "Select All (Semua Teman)" if mode == "all" else "Groups / Labeling"
+        mode_label = t("dash_mode_all") if mode == "all" else t("dash_mode_groups")
 
         choices = [
-            Choice(f"🔄 Ganti Mode Pengiriman (Saat ini: {mode_label})", value="toggle_mode"),
-            Choice("📋 Checklist Kontak & Tetapkan Grup (Multi-select)", value="checklist"),
-            Choice("🏷️  Kelola Label Grup", value="groups"),
-            Choice("💬 Konfigurasi Caption Snap (Default, Pool Acak & Khusus)", value="caption"),
-            Choice("🚫 Kelola Daftar Pengecualian (Blacklist / Exclude)", value="exclude"),
-            Choice("👁️  Pratinjau Caption yang Akan Dikirim (Preview)", value="preview"),
+            Choice(t("recip_toggle_mode", mode=mode_label), value="toggle_mode"),
+            Choice(t("recip_checklist"), value="checklist"),
+            Choice(t("recip_groups"), value="groups"),
+            Choice(t("recip_caption"), value="caption"),
+            Choice(t("recip_exclude"), value="exclude"),
+            Choice(t("recip_preview"), value="preview"),
             Separator(),
-            Choice("🔙 Kembali ke Menu Utama", value="back")
+            Choice(t("recip_back"), value="back")
         ]
 
         action = questionary.select(
-            f"👥 Kelola Penerima & Caption [Mode: {mode.upper()}]:",
+            t("recip_menu_title", mode=mode.upper()),
             choices=choices
         ).ask()
 
-        if action == "back" or not action:
+        if action in ("back", None):
             break
-
         elif action == "toggle_mode":
             cfg["mode"] = "groups" if mode == "all" else "all"
             save_config(cfg)
-            log_activity("CONFIG", f"Mode penerima diubah ke: {cfg['mode'].upper()}")
-            print(f"\n[✓] Mode pengiriman diubah ke: {cfg['mode'].upper()}\n")
-
+            log_activity("CONFIG", f"Recipient mode changed to: {cfg['mode'].upper()}")
+            print(t("recip_mode_changed", mode=cfg['mode'].upper()))
         elif action == "checklist":
             contacts = cfg.get("contacts", [])
             if not contacts:
-                print("\n[!] Belum ada kontak tersimpan. Silakan Pindai Kontak di Menu 5.\n")
-                questionary.press_any_key_to_continue().ask()
+                print("\n[!] No contacts saved. Please scan contacts in Account menu first.\n" if CURRENT_LANG == "en" else "\n[!] Belum ada kontak tersimpan. Silakan Pindai Kontak di Menu Akun.\n")
+                questionary.press_any_key_to_continue(t("press_key_continue")).ask()
                 continue
             groups = cfg.get("groups", {})
-            g_choices = list(groups.keys())
-            if not g_choices:
-                print("\n[!] Belum ada grup. Buat grup terlebih dahulu di menu 'Kelola Label Grup'.\n")
-                questionary.press_any_key_to_continue().ask()
-                continue
+            choices_c = []
+            for c in contacts:
+                in_grps = [g for g, d in groups.items() if c in d.get("members", [])]
+                status_str = f"Group: {', '.join(in_grps)}" if in_grps else ("No group" if CURRENT_LANG == "en" else "Belum ada grup")
+                choices_c.append(Choice(title=f"{c:<24} ({status_str})", value=c, checked=len(in_grps) > 0))
 
-            target_grp = questionary.select("Pilih grup untuk mengelompokkan kontak:", choices=g_choices).ask()
-            if target_grp:
-                curr_members = groups[target_grp].get("members", [])
-                c_choices = [Choice(c, value=c, checked=(c in curr_members)) for c in contacts]
-                chosen = questionary.checkbox(f"Pilih kontak untuk grup '{target_grp}':", choices=c_choices).ask()
-                if chosen is not None:
-                    groups[target_grp]["members"] = chosen
+            selected = questionary.checkbox(
+                "Select contacts to group:" if CURRENT_LANG == "en" else "Pilih kontak untuk dikelompokkan:",
+                choices=choices_c
+            ).ask()
+
+            if selected:
+                g_choices = list(groups.keys()) + [
+                    Separator(),
+                    "➕ Create New Group" if CURRENT_LANG == "en" else "➕ Buat Grup Baru",
+                    "🗑️  Reset / Remove from Groups" if CURRENT_LANG == "en" else "🗑️  Reset / Hapus dari Semua Grup"
+                ]
+                target_grp = questionary.select("Select group:" if CURRENT_LANG == "en" else "Pilih grup:", choices=g_choices).ask()
+                if target_grp and "Create" in target_grp:
+                    new_g = questionary.text("New group name:" if CURRENT_LANG == "en" else "Nama grup baru:").ask()
+                    if new_g and new_g.strip():
+                        groups[new_g.strip()] = {"caption": "🔥", "members": list(selected)}
+                        cfg["groups"] = groups
+                        save_config(cfg)
+                        print("\n[✓] Saved!\n")
+                elif target_grp and "Reset" in target_grp:
+                    for g in groups:
+                        groups[g]["members"] = [m for m in groups[g]["members"] if m not in selected]
                     cfg["groups"] = groups
                     save_config(cfg)
-                    log_activity("CONFIG", f"Anggota grup '{target_grp}' diperbarui ({len(chosen)} kontak).")
-                    print(f"\n[✓] Grup '{target_grp}' diperbarui ({len(chosen)} kontak)!\n")
+                    print("\n[✓] Reset!\n")
+                elif target_grp:
+                    groups[target_grp]["members"] = list(set(groups[target_grp].get("members", []) + selected))
+                    cfg["groups"] = groups
+                    save_config(cfg)
+                    print("\n[✓] Saved!\n")
+            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
         elif action == "groups":
             groups = cfg.get("groups", {})
-            print("\n" + "=" * 55)
-            print("🏷️  Daftar Grup Snapchat:")
-            for g, inf in groups.items():
-                print(f"  • {g:<18} ({len(inf.get('members', []))} anggota)")
-            print("=" * 55 + "\n")
-            g_act = questionary.select("Aksi Grup:", choices=[
-                Choice("➕ Tambah Grup Baru", value="add"),
-                Choice("🗑️  Hapus Grup", value="del"),
-                Choice("🔙 Kembali", value="back")
+            print("\n" + "-" * 55)
+            print("🏷️  GROUPS:" if CURRENT_LANG == "en" else "🏷️  DAFTAR GRUP:")
+            print("-" * 55)
+            for g, d in groups.items():
+                print(f" • {g} ({len(d.get('members', []))} members): '{d.get('caption', '🔥')}'")
+            print("-" * 55 + "\n")
+            g_act = questionary.select("Group Action:" if CURRENT_LANG == "en" else "Aksi Grup:", choices=[
+                "➕ Add Group" if CURRENT_LANG == "en" else "➕ Tambah Grup",
+                "✏️  Edit Group Caption" if CURRENT_LANG == "en" else "✏️  Ubah Caption Grup",
+                "🗑️  Delete Group" if CURRENT_LANG == "en" else "🗑️  Hapus Grup",
+                "🔙 Back" if CURRENT_LANG == "en" else "🔙 Kembali"
             ]).ask()
-            if g_act == "add":
-                g_name = questionary.text("Nama grup baru:").ask()
-                if g_name and g_name.strip():
-                    groups[g_name.strip()] = {"caption": "🔥", "members": []}
+            if g_act and "Add" in g_act:
+                gn = questionary.text("Group name:" if CURRENT_LANG == "en" else "Nama grup:").ask()
+                if gn and gn.strip():
+                    gc = questionary.text("Caption:", default="🔥").ask() or "🔥"
+                    groups[gn.strip()] = {"caption": gc, "members": []}
                     cfg["groups"] = groups
                     save_config(cfg)
-                    print(f"[✓] Grup '{g_name.strip()}' ditambahkan!\n")
-            elif g_act == "del":
-                to_del = questionary.select("Pilih grup untuk dihapus:", choices=list(groups.keys())).ask()
+            elif g_act and "Delete" in g_act:
+                to_del = questionary.select("Select group to delete:" if CURRENT_LANG == "en" else "Pilih grup untuk dihapus:", choices=list(groups.keys())).ask()
                 if to_del and to_del in groups:
                     del groups[to_del]
                     cfg["groups"] = groups
                     save_config(cfg)
-                    print(f"[✓] Grup '{to_del}' berhasil dihapus!\n")
 
         elif action == "caption":
             curr_def = cfg.get("default_caption", "🔥")
-            new_cap = questionary.text("Masukkan caption default untuk Snap:", default=curr_def).ask()
-            if new_cap is not None:
-                cfg["default_caption"] = new_cap.strip()
+            new_def = questionary.text("Default Snap Caption:" if CURRENT_LANG == "en" else "Caption Default Snap:", default=curr_def).ask()
+            if new_def:
+                cfg["default_caption"] = new_def
                 save_config(cfg)
-                log_activity("CONFIG", f"Caption default diubah menjadi: '{new_cap.strip()}'")
-                print(f"\n[✓] Caption default diperbarui menjadi: '{new_cap.strip()}'\n")
+                print("\n[✓] Saved!\n")
 
         elif action == "exclude":
             excludes = cfg.get("select_all", {}).get("exclude", [])
-            contacts = cfg.get("contacts", [])
-            c_choices = [Choice(c, value=c, checked=(c in excludes)) for c in contacts]
-            chosen_ex = questionary.checkbox("Pilih kontak yang DIKECUALIKAN (Blacklist dari pengiriman):", choices=c_choices).ask()
-            if chosen_ex is not None:
-                cfg.setdefault("select_all", {})["exclude"] = chosen_ex
-                save_config(cfg)
-                log_activity("CONFIG", f"Daftar pengecualian diperbarui ({len(chosen_ex)} kontak).")
-                print(f"\n[✓] Daftar blacklist diperbarui ({len(chosen_ex)} kontak)!\n")
+            print("\n" + "-" * 55)
+            print("🚫 EXCLUDE / BLACKLIST:" if CURRENT_LANG == "en" else "🚫 DAFTAR EXCLUDE:")
+            print("-" * 55)
+            for idx, e in enumerate(excludes, 1):
+                print(f" {idx}. {e}")
+            print("-" * 55 + "\n")
+            ex_act = questionary.select("Exclude Action:" if CURRENT_LANG == "en" else "Aksi Exclude:", choices=[
+                "➕ Add Name" if CURRENT_LANG == "en" else "➕ Tambah Nama",
+                "🗑️  Remove Name" if CURRENT_LANG == "en" else "🗑️  Hapus Nama",
+                "🔙 Back" if CURRENT_LANG == "en" else "🔙 Kembali"
+            ]).ask()
+            if ex_act and "Add" in ex_act:
+                nn = questionary.text("Name to exclude:" if CURRENT_LANG == "en" else "Nama untuk dikecualikan:").ask()
+                if nn and nn.strip():
+                    excludes.append(nn.strip())
+                    cfg.setdefault("select_all", {})["exclude"] = excludes
+                    save_config(cfg)
+            elif ex_act and "Remove" in ex_act:
+                if excludes:
+                    to_rem = questionary.checkbox("Select to remove:" if CURRENT_LANG == "en" else "Pilih untuk dihapus:", choices=excludes).ask()
+                    if to_rem:
+                        cfg["select_all"]["exclude"] = [e for e in excludes if e not in to_rem]
+                        save_config(cfg)
 
         elif action == "preview":
-            contacts = cfg.get("contacts", []) or ["Budi", "Siti", "Andi"]
-            print("\n" + "=" * 60)
-            print("👁️  PRATINJAU CAPTION SNAP STREAK:")
-            for c in contacts[:5]:
-                cap = resolve_caption_for_contact(c)
-                print(f"  Kepada: {c:<16} -> Caption: \"{cap}\"")
-            print("=" * 60 + "\n")
-            questionary.press_any_key_to_continue().ask()
-
+            contacts = cfg.get("contacts", [])
+            print("\n" + "=" * 65)
+            print("👁️  SNAP CAPTION PREVIEW" if CURRENT_LANG == "en" else "👁️  PRATINJAU CAPTION SNAP")
+            print("=" * 65)
+            sample = contacts[:5] if contacts else ["Alice Smith", "Bob Wilson"]
+            for s in sample:
+                cap = resolve_caption_for_contact(s)
+                print(f"  To     : {s}")
+                print(f"  Caption: '{cap}'\n")
+            print("=" * 65 + "\n")
+            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
 def show_telegram_guide():
     print("\n" + "=" * 62)
-    print("📖 Panduan Singkat Integrasi Telegram (Cuma 1 Menit):")
-    print("=" * 62)
-    print("1. Buka aplikasi Telegram di HP / Laptop kamu.")
-    print("2. Cari @BotFather (bot resmi centang biru dari Telegram).")
-    print("3. Kirim perintah /newbot dan ikuti instruksi:")
-    print("   -> Masukkan nama tampilan bot (misal: 'Streak Helper')")
-    print("   -> Masukkan username bot (harus berakhiran 'bot', misal: 'sam_streak_bot')")
-    print("   -> BotFather akan memberikan HTTP API Token.")
-    print("4. Ambil Chat ID pribadi kamu:")
-    print("   -> Cari @userinfobot di Telegram, klik Start.")
-    print("   -> Bot tersebut langsung membalas nomor 'Id: 123456789' (Chat ID).")
-    print("5. PENTING: Buka bot buatanmu (dari langkah 3) lalu klik tombol START!")
-    print("   (Bot Telegram tidak bisa kirim pesan sebelum kamu klik Start).")
+    if CURRENT_LANG == "en":
+        print("📖 Telegram Bot Quick Integration Guide (1 Minute):")
+        print("=" * 62)
+        print("1. Open Telegram on your Phone or Laptop.")
+        print("2. Search for @BotFather (verified official bot).")
+        print("3. Send /newbot command and follow instructions:")
+        print("   -> Set bot display name (e.g., 'Snapchat Helper')")
+        print("   -> Set bot username ending in 'bot' (e.g., 'sam_snap_bot')")
+        print("   -> BotFather will provide your HTTP API Token.")
+        print("4. Get your personal Chat ID:")
+        print("   -> Search @userinfobot on Telegram, click Start.")
+        print("   -> It immediately replies with your 'Id: 123456789' (Chat ID).")
+        print("5. CRITICAL: Open your created bot (step 3) and click START!")
+    else:
+        print("📖 Panduan Singkat Integrasi Telegram (Cuma 1 Menit):")
+        print("=" * 62)
+        print("1. Buka aplikasi Telegram di HP / Laptop kamu.")
+        print("2. Cari @BotFather (bot resmi centang biru dari Telegram).")
+        print("3. Kirim perintah /newbot dan ikuti instruksi:")
+        print("   -> Masukkan nama tampilan bot (misal: 'Streak Helper')")
+        print("   -> Masukkan username bot (harus berakhiran 'bot', misal: 'sam_snap_bot')")
+        print("   -> BotFather akan memberikan HTTP API Token.")
+        print("4. Ambil Chat ID pribadi kamu:")
+        print("   -> Cari @userinfobot di Telegram, klik Start.")
+        print("   -> Bot tersebut langsung membalas nomor 'Id: 123456789' (Chat ID).")
+        print("5. PENTING: Buka bot buatanmu (dari langkah 3) lalu klik tombol START!")
     print("=" * 62 + "\n")
-    questionary.press_any_key_to_continue().ask()
-
+    questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
 def menu_notifications():
     while True:
         cfg = load_config()
-        notifs = cfg.get("notifications", {})
-        tg = notifs.get("telegram", {})
-        dc = notifs.get("discord", {})
+        notifs = cfg.setdefault("notifications", {})
+        tg = notifs.setdefault("telegram", {})
+        dc = notifs.setdefault("discord", {})
 
         choices = [
-            Choice(f"📱 Telegram Bot: {'🟢 AKTIF' if tg.get('enabled') else '⚪ Nonaktif'}", value="telegram"),
-            Choice(f"💬 Discord Webhook: {'🟢 AKTIF' if dc.get('enabled') else '⚪ Nonaktif'}", value="discord"),
-            Choice("🔔 Tes Semua Notifikasi Aktif", value="test_all"),
+            Choice(t("notif_telegram", status=t('status_active_upper') if tg.get('enabled') else t('status_inactive_upper')), value="telegram"),
+            Choice(t("notif_discord", status=t('status_active_upper') if dc.get('enabled') else t('status_inactive_upper')), value="discord"),
+            Choice(t("notif_test_all"), value="test_all"),
             Separator(),
-            Choice("🔙 Kembali ke Menu Utama", value="back")
+            Choice(t("notif_back"), value="back")
         ]
 
-        action = questionary.select("🔔 Pengaturan Notifikasi ke HP:", choices=choices).ask()
-        if action == "back" or not action:
+        action = questionary.select(t("notif_menu_title"), choices=choices).ask()
+        if action in ("back", None):
             break
-
         elif action == "telegram":
-            t_act = questionary.select("Pengaturan Telegram:", choices=[
-                Choice(f"🔄 {'Nonaktifkan' if tg.get('enabled') else 'Aktifkan'}", value="toggle"),
-                Choice("✏️  Atur / Ubah Token & Chat ID", value="edit"),
-                Choice("🔔 Tes Notifikasi Telegram", value="test"),
-                Choice("📖 Panduan Cara Dapatkan Token & ID", value="guide"),
-                Choice("🔙 Kembali", value="back")
+            t_act = questionary.select("Telegram Settings:" if CURRENT_LANG == "en" else "Pengaturan Telegram:", choices=[
+                "🔄 Toggle Enable/Disable" if CURRENT_LANG == "en" else "🔄 Aktifkan / Nonaktifkan",
+                "✏️  Configure Bot Token & Chat ID" if CURRENT_LANG == "en" else "✏️  Atur Token & Chat ID",
+                "🔔 Test Send Notification" if CURRENT_LANG == "en" else "🔔 Tes Kirim Notifikasi",
+                "📖 Guide" if CURRENT_LANG == "en" else "📖 Panduan Singkat",
+                "🔙 Back" if CURRENT_LANG == "en" else "🔙 Kembali"
             ]).ask()
-
-            if t_act == "toggle":
+            if t_act and "Toggle" in t_act:
                 tg["enabled"] = not tg.get("enabled", False)
                 save_config(cfg)
-                print(f"[✓] Telegram: {'AKTIF' if tg['enabled'] else 'NONAKTIF'}\n")
-            elif t_act == "edit":
-                tok = questionary.text("Telegram Bot Token:", default=tg.get("bot_token", "")).ask()
-                cid = questionary.text("Telegram Chat ID:", default=tg.get("chat_id", "")).ask()
-                if tok is not None:
-                    tg["bot_token"] = tok.strip()
-                if cid is not None:
-                    tg["chat_id"] = cid.strip()
-                if tg.get("bot_token") and tg.get("chat_id"):
-                    tg["enabled"] = True
+            elif t_act and "Configure" in t_act or (t_act and "Atur" in t_act):
+                token = questionary.text("Bot Token:", default=tg.get("bot_token", "")).ask()
+                chat_id = questionary.text("Chat ID:", default=tg.get("chat_id", "")).ask()
+                if token: tg["bot_token"] = token.strip()
+                if chat_id: tg["chat_id"] = chat_id.strip()
+                if tg.get("bot_token") and tg.get("chat_id"): tg["enabled"] = True
                 save_config(cfg)
-                print("[✓] Konfigurasi Telegram disimpan!\n")
-            elif t_act == "test":
-                if not tg.get("bot_token") or not tg.get("chat_id"):
-                    print("[!] Lengkapi Token dan Chat ID terlebih dahulu.\n")
-                else:
-                    ok, msg = send_telegram_notification(tg["bot_token"], tg["chat_id"], "Tes Snapchat Streak", "Halo! Notifikasi bot Snapchat Streak berhasil terhubung 🎉", True)
-                    print(f"[{'✓' if ok else '!'}] {msg}\n")
-                questionary.press_any_key_to_continue().ask()
-            elif t_act == "guide":
+            elif t_act and "Test" in t_act or (t_act and "Tes" in t_act):
+                ok, msg = send_telegram_notification(tg.get("bot_token", ""), tg.get("chat_id", ""), "Snapchat Streak Test", "Test alert from Snapchat Streak! 🎉", True)
+                print(f"[{'✓' if ok else '!'}] {msg}")
+                questionary.press_any_key_to_continue(t("press_key_continue")).ask()
+            elif t_act and "Guide" in t_act or (t_act and "Panduan" in t_act):
                 show_telegram_guide()
 
         elif action == "discord":
-            d_act = questionary.select("Pengaturan Discord:", choices=[
-                Choice(f"🔄 {'Nonaktifkan' if dc.get('enabled') else 'Aktifkan'}", value="toggle"),
-                Choice("✏️  Atur / Ubah Webhook URL", value="edit"),
-                Choice("🔔 Tes Notifikasi Discord", value="test"),
-                Choice("🔙 Kembali", value="back")
+            d_act = questionary.select("Discord Settings:" if CURRENT_LANG == "en" else "Pengaturan Discord:", choices=[
+                "🔄 Toggle Enable/Disable" if CURRENT_LANG == "en" else "🔄 Aktifkan / Nonaktifkan",
+                "✏️  Configure Webhook URL" if CURRENT_LANG == "en" else "✏️  Atur Webhook URL",
+                "🔔 Test Send Notification" if CURRENT_LANG == "en" else "🔔 Tes Kirim Notifikasi",
+                "🔙 Back" if CURRENT_LANG == "en" else "🔙 Kembali"
             ]).ask()
-            if d_act == "toggle":
+            if d_act and "Toggle" in d_act:
                 dc["enabled"] = not dc.get("enabled", False)
                 save_config(cfg)
-                print(f"[✓] Discord Webhook: {'AKTIF' if dc['enabled'] else 'NONAKTIF'}\n")
-            elif d_act == "edit":
+            elif d_act and "Configure" in d_act or (d_act and "Atur" in d_act):
                 url = questionary.text("Discord Webhook URL:", default=dc.get("webhook_url", "")).ask()
-                if url is not None:
-                    dc["webhook_url"] = url.strip()
-                if dc.get("webhook_url"):
-                    dc["enabled"] = True
+                if url: dc["webhook_url"] = url.strip(); dc["enabled"] = True
                 save_config(cfg)
-                print("[✓] Discord Webhook disimpan!\n")
-            elif d_act == "test":
-                if not dc.get("webhook_url"):
-                    print("[!] Masukkan Webhook URL terlebih dahulu.\n")
-                else:
-                    ok, msg = send_discord_notification(dc["webhook_url"], "Tes Snapchat Streak", "Halo! Webhook Discord Snapchat Streak terhubung 🎉", True)
-                    print(f"[{'✓' if ok else '!'}] {msg}\n")
-                questionary.press_any_key_to_continue().ask()
+            elif d_act and "Test" in d_act or (d_act and "Tes" in d_act):
+                ok, msg = send_discord_notification(dc.get("webhook_url", ""), "Snapchat Streak Test", "Test alert from Snapchat Streak! 🎉", True)
+                print(f"[{'✓' if ok else '!'}] {msg}")
+                questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
         elif action == "test_all":
-            print("\n[*] Mengirim notifikasi tes...")
-            send_notification("Tes Notifikasi Snapchat Streak", "Halo! Notifikasi pengingat streak berhasil terhubung.", success=True)
-            print("[✓] Notifikasi tes dikirim!\n")
-            questionary.press_any_key_to_continue().ask()
-
+            print(t("notif_test_sending"))
+            send_notification("Snapchat Streak Test", "All active notifications delivered successfully! 🎉", True)
+            print(t("notif_test_done"))
+            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
 def menu_account():
     while True:
         is_logged_in = check_login_status()
         contacts = load_config().get("contacts", [])
-        status_label = "🟢 VALID (Aktif)" if is_logged_in else "🔴 BELUM LOGIN"
+        status_label = t("dash_status_valid") if is_logged_in else t("dash_status_unauthed")
 
         choices = [
-            Choice(f"🔍 Pindai Kontak Teman dari Snapchat (Tersimpan: {len(contacts)} teman)", value="scan"),
-            Choice("🔑 Login / Hubungkan Akun Snapchat (Buka Jendela Browser)", value="login"),
-            Choice(f"ℹ️  Cek Ulang Status Sesi Login (Status: {status_label})", value="check"),
-            Choice("🚪 Logout / Hapus Sesi Akun & Reset Cache Teman", value="logout"),
+            Choice(t("account_opt_scan", count=len(contacts)), value="scan"),
+            Choice(t("account_opt_login"), value="login"),
+            Choice(t("account_opt_check", status=status_label), value="check"),
+            Choice(t("account_opt_logout"), value="logout"),
             Separator(),
-            Choice("🔙 Kembali ke Menu Utama", value="back")
+            Choice(t("account_opt_back"), value="back")
         ]
 
-        action = questionary.select("🔑 Manajemen Akun & Kontak Snapchat:", choices=choices).ask()
-        if action == "back" or not action:
+        action = questionary.select(t("account_menu_title"), choices=choices).ask()
+        if action in ("back", None):
             break
-
         elif action == "scan":
-            if not check_login_status():
-                print("\n[!] Akun Snapchat Anda belum terhubung (Sesi Kosong / Belum Login).")
-                do_login = questionary.confirm("Buka jendela browser untuk login sekarang?", default=True).ask()
-                if do_login:
-                    interactive_login()
-                else:
-                    questionary.press_any_key_to_continue().ask()
-                    continue
             scan_snapchat_friends(verbose=True)
-            questionary.press_any_key_to_continue().ask()
-
+            questionary.press_any_key_to_continue(t("press_key_return")).ask()
         elif action == "login":
             interactive_login()
-            questionary.press_any_key_to_continue().ask()
-
+            questionary.press_any_key_to_continue(t("press_key_return")).ask()
         elif action == "check":
-            print("\n[*] Memeriksa sesi browser Snapchat...")
             ok = check_login_status()
-            print(f"[{'✓' if ok else '!'}] Status Sesi: {'🟢 VALID (Aktif)' if ok else '🔴 KADALUARSA / BELUM LOGIN'}\n")
-            questionary.press_any_key_to_continue().ask()
-
+            print(f"[{'✓' if ok else '!'}] Status: {t('dash_status_valid') if ok else t('dash_status_unauthed')}\n")
+            questionary.press_any_key_to_continue(t("press_key_return")).ask()
         elif action == "logout":
-            confirm = questionary.confirm("Yakin ingin logout dan menghapus sesi akun serta cache teman?", default=False).ask()
+            confirm = questionary.confirm(t("logout_confirm"), default=False).ask()
             if confirm:
                 logout_snapchat(verbose=True)
-            questionary.press_any_key_to_continue().ask()
-
+            questionary.press_any_key_to_continue(t("press_key_return")).ask()
 
 def menu_manage_scheduler():
     while True:
         is_active, desc = get_scheduler_status()
         cfg = load_config()
         sched = cfg.get("schedule", {"hour": 9, "minute": 0})
-        time_str = f"{sched['hour']:02d}:{sched['minute']:02d}"
+        time_str = f"{sched.get('hour', 9):02d}:{sched.get('minute', 0):02d}"
 
         choices = [
-            Choice(f"⏰ Pasang / Aktifkan Jadwal Harian (Jam {time_str} + Auto Catch-up)", value="install"),
-            Choice(f"🕒 Ubah Jam Eksekusi (Saat ini: Jam {time_str})", value="change_time"),
-            Choice("🗑️  Matikan / Hapus Jadwal", value="remove"),
+            Choice(t("sched_opt_install", time=time_str), value="install"),
+            Choice(t("sched_opt_change_time", time=time_str), value="change_time"),
+            Choice(t("sched_opt_remove"), value="remove"),
             Separator(),
-            Choice("🔙 Kembali ke Menu Utama", value="back")
+            Choice("🔙 Back to Main Menu" if CURRENT_LANG == "en" else "🔙 Kembali ke Menu Utama", value="back")
         ]
 
         action = questionary.select(
-            f"⏰ Pengatur Jadwal Harian [{OS_NAME}] (Status: {'🟢' if is_active else '⚪'} {desc}):",
+            t("sched_menu_title", os=OS_NAME, badge='🟢 ' + desc if is_active else '⚪ ' + desc),
             choices=choices
         ).ask()
 
-        if action == "back" or not action:
+        if action in ("back", None):
             break
-
         elif action == "install":
             install_scheduler()
-            questionary.press_any_key_to_continue().ask()
-
+            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
         elif action == "change_time":
-            new_time = questionary.text("Masukkan jam baru (Format JJ:MM, contoh: 08:30):", default=time_str).ask()
+            new_time = questionary.text(t("sched_prompt_new_time"), default=time_str).ask()
             if new_time and ":" in new_time:
                 try:
                     h, m = map(int, new_time.split(":", 1))
                     if 0 <= h <= 23 and 0 <= m <= 59:
                         cfg["schedule"] = {"hour": h, "minute": m}
                         save_config(cfg)
-                        print(f"\n[✓] Waktu jadwal diubah ke {h:02d}:{m:02d}.")
+                        print(t("sched_time_changed", time=f"{h:02d}:{m:02d}"))
                         if is_active:
                             install_scheduler()
+                    else:
+                        print(t("sched_time_invalid"))
                 except ValueError:
-                    print("\n[!] Format waktu salah.")
-            questionary.press_any_key_to_continue().ask()
-
+                    print(t("sched_time_invalid"))
+            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
         elif action == "remove":
             remove_scheduler()
-            questionary.press_any_key_to_continue().ask()
-
+            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
 def menu_view_logs():
     while True:
         choices = [
-            Choice("📜 Lihat Semua Log (3 Hari Terakhir)", value="all"),
-            Choice("🚀 Filter Log Eksekusi Snap (JOB)", value="job"),
-            Choice("⚙️  Filter Perubahan Pengaturan (CONFIG)", value="config"),
-            Choice("🧹 Bersihkan Log Manual Sekarang", value="clean"),
+            Choice(t("logs_opt_all"), value="all"),
+            Choice(t("logs_opt_job"), value="job"),
+            Choice(t("logs_opt_config"), value="config"),
+            Choice(t("logs_opt_clean"), value="clean"),
             Separator(),
-            Choice("🔙 Kembali ke Menu Utama", value="back")
+            Choice(t("logs_opt_back"), value="back")
         ]
 
-        act = questionary.select("📜 Riwayat Aktivitas & Log (Retensi Otomatis 3 Hari):", choices=choices).ask()
-        if act == "back" or not act:
+        act = questionary.select(t("logs_menu_title"), choices=choices).ask()
+        if act in ("back", None):
             break
-
-        if act in ("all", "job", "config"):
+        elif act in ("all", "job", "config"):
             cat = None if act == "all" else act.upper()
             clean_expired_logs(3)
             files = sorted([f for f in os.listdir(LOG_DIR) if f.startswith("activity_") and f.endswith(".log")])
@@ -1787,131 +1944,147 @@ def menu_view_logs():
                     pass
 
             print("\n" + "=" * 70)
-            print(f"📜 RIWAYAT AKTIVITAS & LOG ({'Semua' if not cat else cat}):")
+            print(f"📜 LOGS ({'All' if not cat else cat}):" if CURRENT_LANG == "en" else f"📜 RIWAYAT AKTIVITAS & LOG ({'Semua' if not cat else cat}):")
             print("=" * 70)
             if not all_entries:
-                print("  (Tidak ada catatan log)")
+                print("  (No logs recorded)")
             else:
                 for entry in all_entries[-40:]:
                     print(f"  {entry}")
             print("=" * 70 + "\n")
-            questionary.press_any_key_to_continue().ask()
+            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
         elif act == "clean":
-            if questionary.confirm("Hapus semua log aktivitas sekarang?").ask():
+            if questionary.confirm(t("logs_clean_confirm")).ask():
                 for f in os.listdir(LOG_DIR):
                     if f.startswith("activity_"):
                         try:
                             os.remove(os.path.join(LOG_DIR, f))
                         except Exception:
                             pass
-                print("\n[✓] Seluruh riwayat log berhasil dibersihkan!\n")
-                questionary.press_any_key_to_continue().ask()
+                print(t("logs_cleaned"))
+                questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
+def menu_language():
+    cfg = load_config()
+    choices = [
+        Choice(t("lang_opt_en"), value="en"),
+        Choice(t("lang_opt_id"), value="id"),
+        Separator(),
+        Choice(t("lang_opt_back"), value="back")
+    ]
+    chosen = questionary.select(t("lang_menu_title"), choices=choices).ask()
+    if chosen and chosen != "back":
+        cfg["language"] = chosen
+        save_config(cfg)
+        set_language(chosen)
+        lang_name = "English" if chosen == "en" else "Bahasa Indonesia"
+        print(t("lang_changed", lang=lang_name))
 
 def interactive_hub():
     while True:
+        cfg = load_config()
+        set_language(cfg.get("language", "en"))
         print_dashboard()
         is_logged_in = check_login_status()
 
+        sched = cfg.get("schedule", {"hour": 9, "minute": 0})
+        time_str = f"{sched.get('hour', 9):02d}:{sched.get('minute', 0):02d}"
+        lang_name = "English" if CURRENT_LANG == "en" else "Bahasa Indonesia"
+
         if not is_logged_in:
             choices = [
-                Choice("🔑 [WAJIB] LOGIN / HUBUNGKAN AKUN SEKARANG (Buka Browser)", value="login"),
-                Choice("🚀 Kirim Streak Sekarang (Perlu Login Terlebih Dahulu)", value="run"),
-                Choice("👥 Kelola Penerima & Caption (Penerima, Grup & Template)", value="recipients"),
-                Choice("⏰ Jadwal Otomatis Harian (LaunchAgent @ 09:00 + Wake-up Catch-up)", value="scheduler"),
-                Choice("📜 Riwayat Aktivitas & Log (Tersimpan 3 Hari)", value="logs"),
-                Choice("🔔 Pengaturan Notifikasi (Telegram / Discord)", value="notifications"),
-                Choice("🔄 Cek Pembaruan Aplikasi (Check for Updates)", value="check_update"),
+                Choice(t("menu_opt_login_req"), value="login"),
+                Choice(t("menu_opt_run_need_login"), value="run"),
+                Choice(t("menu_opt_recipients"), value="recipients"),
+                Choice(t("menu_opt_scheduler", time=time_str), value="scheduler"),
+                Choice(t("menu_opt_logs"), value="logs"),
+                Choice(t("menu_opt_notifications"), value="notifications"),
+                Choice(t("menu_opt_check_update"), value="check_update"),
+                Choice(t("menu_opt_lang", current=lang_name), value="language"),
                 Separator(),
-                Choice("🚪 Keluar", value="exit")
+                Choice(t("menu_opt_exit"), value="exit")
             ]
         else:
             choices = [
-                Choice("🚀 Kirim Streak Sekarang (Run Snap Check-in)", value="run"),
-                Choice("👥 Kelola Penerima & Caption (Penerima, Grup & Template)", value="recipients"),
-                Choice("⏰ Jadwal Otomatis Harian (LaunchAgent @ 09:00 + Wake-up Catch-up)", value="scheduler"),
-                Choice("📜 Riwayat Aktivitas & Log (Tersimpan 3 Hari)", value="logs"),
-                Choice("🔑 Akun & Pindai Kontak (Login & Scan Teman Snapchat)", value="account"),
-                Choice("🔔 Pengaturan Notifikasi (Telegram / Discord)", value="notifications"),
-                Choice("🔄 Cek Pembaruan Aplikasi (Check for Updates)", value="check_update"),
+                Choice(t("menu_opt_run"), value="run"),
+                Choice(t("menu_opt_recipients"), value="recipients"),
+                Choice(t("menu_opt_scheduler", time=time_str), value="scheduler"),
+                Choice(t("menu_opt_logs"), value="logs"),
+                Choice(t("menu_opt_account"), value="account"),
+                Choice(t("menu_opt_notifications"), value="notifications"),
+                Choice(t("menu_opt_check_update"), value="check_update"),
+                Choice(t("menu_opt_lang", current=lang_name), value="language"),
                 Separator(),
-                Choice("🚪 Keluar", value="exit")
+                Choice(t("menu_opt_exit"), value="exit")
             ]
 
         action = questionary.select(
-            "Pilih Menu:",
+            t("menu_select"),
             choices=choices,
             use_indicator=True
         ).ask()
 
         if action in ("exit", None):
-            print("\n👋 Sampai jumpa! Snap streak Anda aman.\n")
+            print(t("goodbye"))
             break
-
         elif action == "login":
             interactive_login()
-            questionary.press_any_key_to_continue().ask()
-
+            questionary.press_any_key_to_continue(t("press_key_return")).ask()
         elif action == "run":
             if not check_login_status():
-                print("\n[!] Anda belum login ke akun Snapchat.")
-                do_login = questionary.confirm("Buka jendela browser untuk login sekarang?", default=True).ask()
+                print("\n[!] Not logged in to Snapchat." if CURRENT_LANG == "en" else "\n[!] Anda belum login ke akun Snapchat.")
+                do_login = questionary.confirm("Open browser window to log in now?" if CURRENT_LANG == "en" else "Buka jendela browser untuk login sekarang?", default=True).ask()
                 if do_login:
                     interactive_login()
             else:
                 run_send_streak(force=True, verbose=True)
-                questionary.press_any_key_to_continue().ask()
-
+                questionary.press_any_key_to_continue(t("press_key_return")).ask()
         elif action == "recipients":
             menu_manage_recipients()
-
         elif action == "scheduler":
             menu_manage_scheduler()
-
         elif action == "logs":
             menu_view_logs()
-
         elif action == "account":
             menu_account()
-
         elif action == "notifications":
             menu_notifications()
-
         elif action == "check_update":
             check_for_updates(prompt_if_latest=True)
+        elif action == "language":
+            menu_language()
 
 # ==============================================================================
 # CLI Entry Point & Background Worker
 # ==============================================================================
 
 def run_cron_job(max_retries: int = 3, retry_delay: int = 40):
-    log_activity("SYSTEM", "Snapchat Streak auto-worker dipicu oleh scheduler.")
+    log_activity("SYSTEM", "Snapchat Streak auto-worker triggered by scheduler.")
 
     if not wait_for_internet(timeout=180, verbose=False):
-        err = "Cron dibatalkan: Laptop belum terhubung ke internet setelah 3 menit."
+        err = "Cron cancelled: Laptop not connected to internet after 180s."
         log_activity("SYSTEM", err)
         return
 
     is_safe, desc = is_within_safe_hours()
     if not is_safe:
-        log_activity("SYSTEM", f"Cron ditangguhkan: di luar jam aman {desc}.")
+        log_activity("SYSTEM", f"Cron postponed: Outside safe hours {desc}.")
         return
 
     for attempt in range(1, max_retries + 1):
         res = run_send_streak(force=False, verbose=False)
         st = res.get("status")
         if st in ("success", "skipped"):
-            log_activity("SYSTEM", f"Cron selesai pada percobaan ke-{attempt}: {st}")
+            log_activity("SYSTEM", f"Cron completed on attempt #{attempt}: {st}")
             return
         else:
             msg = res.get("message", st)
-            log_activity("SYSTEM", f"Cron percobaan ke-{attempt} gagal ({msg}). Retrying in {retry_delay}s...")
+            log_activity("SYSTEM", f"Cron attempt #{attempt} failed ({msg}). Retrying in {retry_delay}s...")
             if attempt < max_retries:
                 time.sleep(retry_delay)
 
-    log_activity("SYSTEM", f"Cron gagal setelah {max_retries} percobaan.")
-
+    log_activity("SYSTEM", f"Cron failed after {max_retries} attempts.")
 
 def main():
     parser = argparse.ArgumentParser(description="Snapchat Streak Auto-Saver Hub")
@@ -1920,7 +2093,14 @@ def main():
     parser.add_argument("--scan", action="store_true", help="Scan Snapchat friends and exit")
     parser.add_argument("--login", action="store_true", help="Launch interactive login window")
     parser.add_argument("--logout", action="store_true", help="Logout Snapchat and clear saved session and contacts")
+    parser.add_argument("--lang", "--language", choices=["en", "id"], help="Set UI language (en/id)")
     args = parser.parse_args()
+
+    cfg = load_config()
+    if args.lang:
+        set_language(args.lang)
+    else:
+        set_language(cfg.get("language", "en"))
 
     if args.cron:
         run_cron_job()
@@ -1935,7 +2115,6 @@ def main():
     else:
         check_for_updates(prompt_if_latest=False)
         interactive_hub()
-
 
 if __name__ == "__main__":
     try:

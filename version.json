@@ -1,15 +1,14 @@
 {
-  "name": "snapchat-streak",
-  "version": "1.0.0",
-  "release_date": "2026-11-10",
+  "app": "snapchat-streak",
+  "name": "Snapchat Streak Auto-Saver & Helper Hub",
+  "version": "1.4.0",
+  "release_date": "2026-11-13",
   "changelog": [
-    "🚀 Initial Release: Snapchat Streak Automation & Helper Hub",
-    "📸 Automated Snap camera capture & recipient dispatch via web.snapchat.com",
-    "🔥 Auto-detect friends with active Snap streaks",
-    "⏰ macOS LaunchAgent scheduler with morning run and wake-up catch-up",
-    "📜 3-Day activity and audit logging with automatic pruning",
-    "📱 Native Telegram Bot & Discord Webhook notification integration",
-    "🎨 Dynamic Snap caption generator with variable formatting ({name}, {first_name}, {time_greeting}, {date})"
+    "🌐 Bilingual Internationalization: Full support for English (default) & Bahasa Indonesia",
+    "🔄 Interactive language switcher and '--lang' CLI argument support",
+    "💬 Dynamic caption formatting based on selected language (greetings, days, dates)",
+    "📸 Reliable camera shutter, Send To selector, and recipient dispatch",
+    "🛡️ Graceful TargetClosedError handling during friend scanning"
   ],
   "download_url": "https://raw.githubusercontent.com/sammmms/snapchat-streak/main/snapchat-streak.py"
 }
