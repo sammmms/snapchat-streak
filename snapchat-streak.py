@@ -23,7 +23,7 @@ from datetime import datetime, date, timedelta
 OS_NAME = platform.system()
 IS_CRON = "--cron" in sys.argv
 APP_NAME = "snapchat-streak"
-CURRENT_VERSION = "1.4.0"
+CURRENT_VERSION = "1.4.1"
 
 PRIMARY_UPDATE_URL = f"https://script.wsnsam.my.id/api/updates?app={APP_NAME}"
 FALLBACK_UPDATE_URL = f"https://raw.githubusercontent.com/sammmms/{APP_NAME}/main/version.json"
@@ -1049,6 +1049,8 @@ def is_page_logged_in(page) -> bool:
         current_url = page.url.lower()
         if "accounts.snapchat.com/v2/login" in current_url:
             return False
+        if "/?original_referrer" in current_url or "original_referrer" in current_url:
+            return False
 
         login_button = page.locator("button:has-text('Log In'), a:has-text('Log In')")
         if login_button.count() > 0:
@@ -1058,30 +1060,41 @@ def is_page_logged_in(page) -> bool:
 
         chat_indicators = [
             '[aria-label="Friends Feed"]',
-            '[aria-label="Chat"]',
-            'nav',
+            '[aria-label="Chat Feed"]',
+            '[data-testid="chat-feed"]',
             'button.fE2D5',
             'button.qJKfS'
         ]
         for sel in chat_indicators:
-            if page.locator(sel).first.is_visible(timeout=1000):
+            if page.locator(sel).first.is_visible(timeout=1500):
                 return True
 
-        if "web.snapchat.com" in current_url:
+        if "web.snapchat.com" in current_url or "snapchat.com/web" in current_url:
             return True
         return False
     except Exception:
         return False
 
 def check_login_status() -> bool:
+    try:
+        st = load_state()
+        if not st.get("success", True) and "session expired" in str(st.get("summary", "")).lower():
+            return False
+    except Exception:
+        pass
+
     if os.path.exists(STORAGE_STATE_FILE):
         try:
             with open(STORAGE_STATE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             cookies = data.get("cookies", [])
+            now = time.time()
             for c in cookies:
                 if "snapchat" in c.get("domain", ""):
                     name = c.get("name", "").lower()
+                    expires = c.get("expires", -1)
+                    if expires > 0 and expires < now:
+                        continue
                     if "sc-a-" in name or ("session" in name and "blizzard" not in name) or "auth" in name or "sastate" in name:
                         return True
         except Exception:
@@ -1507,6 +1520,11 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
                 err_msg = t("streak_session_expired")
                 log_activity("JOB", err_msg)
                 save_state(False, 0, len(target_recipients), err_msg)
+                if os.path.exists(STORAGE_STATE_FILE):
+                    try:
+                        os.remove(STORAGE_STATE_FILE)
+                    except Exception:
+                        pass
                 send_notification(t("notif_streak_fail_title"), err_msg, success=False)
                 context.close()
                 return {"status": "error", "message": err_msg}

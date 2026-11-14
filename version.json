@@ -1,14 +1,12 @@
 {
   "app": "snapchat-streak",
   "name": "Snapchat Streak Auto-Saver & Helper Hub",
-  "version": "1.4.0",
-  "release_date": "2026-11-13",
+  "version": "1.4.1",
+  "release_date": "2026-11-15",
   "changelog": [
-    "🌐 Bilingual Internationalization: Full support for English (default) & Bahasa Indonesia",
-    "🔄 Interactive language switcher and '--lang' CLI argument support",
-    "💬 Dynamic caption formatting based on selected language (greetings, days, dates)",
-    "📸 Reliable camera shutter, Send To selector, and recipient dispatch",
-    "🛡️ Graceful TargetClosedError handling during friend scanning"
+    "🌐 Support for updated Snapchat Web URL routing (/web/ and web.snapchat.com)",
+    "🔒 Real-time session expiry detection and invalidation of stale auth files",
+    "🛡️ Fixed marketing page false-positive login detection"
   ],
   "download_url": "https://raw.githubusercontent.com/sammmms/snapchat-streak/main/snapchat-streak.py"
 }
