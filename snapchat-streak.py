@@ -1262,11 +1262,86 @@ def logout_snapchat(verbose: bool = True) -> bool:
 # Friends & Streak Scanning Engine
 # ==============================================================================
 
-def scan_snapchat_friends_using_page(page, verbose: bool = True) -> list:
+def parse_snapchat_friends_protobuf(raw_bytes: bytes) -> dict:
+    """Extract {display_name: username} from Snapchat SyncFriendData gRPC response."""
+    if not raw_bytes or len(raw_bytes) < 10:
+        return {}
+
+    # Handle gRPC-web 5-byte frame prefix (1 byte flag + 4 bytes big-endian length)
+    if raw_bytes[0] in (0, 1):
+        import struct
+        msg_len = struct.unpack(">I", raw_bytes[1:5])[0]
+        data = raw_bytes[5:5+msg_len]
+    else:
+        data = raw_bytes
+
+    def decode_varint(buf, pos):
+        res = 0; shift = 0
+        while pos < len(buf):
+            b = buf[pos]; pos += 1
+            res |= (b & 0x7f) << shift
+            if not (b & 0x80): break
+            shift += 7
+        return res, pos
+
+    def parse_chunks(buf):
+        pos = 0; items = []
+        while pos < len(buf):
+            try:
+                key, next_pos = decode_varint(buf, pos)
+                fn = key >> 3; wt = key & 7
+                if fn == 0 or wt not in (0, 1, 2, 5): break
+                pos = next_pos
+                if wt == 0:
+                    v, pos = decode_varint(buf, pos); items.append((fn, wt, v))
+                elif wt == 1: pos += 8
+                elif wt == 2:
+                    length, pos = decode_varint(buf, pos)
+                    val = buf[pos:pos+length]; pos += length
+                    items.append((fn, wt, val))
+                elif wt == 5: pos += 4
+            except Exception: break
+        return items
+
+    result = {}
+    try:
+        top = parse_chunks(data)
+        for fn, wt, val in top:
+            if wt == 2 and fn == 1:
+                sub = parse_chunks(val)
+                for f2, w2, v2 in sub:
+                    if w2 == 2:
+                        fields = parse_chunks(v2)
+                        uname = ""
+                        dname = ""
+                        public_uname = ""
+                        for f3, w3, v3 in fields:
+                            if w3 == 2:
+                                try:
+                                    t = v3.decode("utf-8").strip()
+                                    if f3 == 2 and not uname:
+                                        uname = t
+                                    elif f3 == 3 and not dname:
+                                        dname = t
+                                    elif f3 == 36 and not public_uname:
+                                        public_uname = t
+                                except Exception:
+                                    pass
+                        final_uname = public_uname or uname
+                        if dname and final_uname:
+                            result[dname] = final_uname
+    except Exception:
+        pass
+    return result
+
+def scan_snapchat_friends_using_page(page, verbose: bool = True, captured_usernames: dict = None) -> list:
     cfg = load_config()
     existing_contacts = cfg.get("contacts", [])
     found_contacts = []
     streak_data = cfg.get("streak_data", {})
+    usernames = cfg.setdefault("usernames", {})
+    if captured_usernames:
+        usernames.update(captured_usernames)
 
     if verbose:
         print(t("scan_starting"))
@@ -1320,7 +1395,9 @@ def scan_snapchat_friends_using_page(page, verbose: bool = True) -> list:
                             streak_data[name] = st_count
                         if verbose:
                             badge = f" ({st_count} 🔥)" if st_count else (" 🔥" if has_streak else "")
-                            print(f"  • {name}{badge}")
+                            u = usernames.get(name)
+                            u_badge = f" (@{u})" if u and u.lower() != name.lower() else ""
+                            print(f"  • {name}{u_badge}{badge}")
                 except Exception:
                     continue
 
@@ -1338,6 +1415,7 @@ def scan_snapchat_friends_using_page(page, verbose: bool = True) -> list:
         merged = sorted(list(set(existing_contacts + found_contacts)))
         cfg["contacts"] = merged
         cfg["streak_data"] = streak_data
+        cfg["usernames"] = usernames
         save_config(cfg)
         log_activity("JOB", f"Contact scan completed: found {len(found_contacts)} friends.")
         if verbose:
@@ -1358,6 +1436,19 @@ def scan_snapchat_friends(verbose: bool = True) -> list:
         try:
             context = launch_browser_context(p, headless=True)
             page = context.new_page()
+
+            captured_usernames = {}
+            def on_response(res):
+                if "SyncFriendData" in res.url:
+                    try:
+                        b = res.body()
+                        parsed = parse_snapchat_friends_protobuf(b)
+                        if parsed:
+                            captured_usernames.update(parsed)
+                    except Exception:
+                        pass
+
+            page.on("response", on_response)
             page.goto(SNAPCHAT_WEB_URL, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(5000)
 
@@ -1367,7 +1458,7 @@ def scan_snapchat_friends(verbose: bool = True) -> list:
                 context.close()
                 return []
 
-            res = scan_snapchat_friends_using_page(page, verbose=verbose)
+            res = scan_snapchat_friends_using_page(page, verbose=verbose, captured_usernames=captured_usernames)
             context.close()
             return res
         except Exception as e:
@@ -1446,12 +1537,21 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
         if not selected_via_shortcut:
             modal_container = page.locator(".Zoysu, .SZJHC, form.tvul8").first
             modal_search = modal_container.locator("input").first
+            usernames = cfg.get("usernames", {})
+
             for target in recipient_names:
                 try:
                     if modal_search.is_visible(timeout=1000):
-                        modal_search.fill(target)
+                        uname = usernames.get(target)
+                        search_term = uname if uname else target
+                        modal_search.fill(search_term)
                         page.wait_for_timeout(1000)
                         item_checkbox = modal_container.locator("li, [role='listitem'], div[class*='Ewflr']").first
+                        if not item_checkbox.is_visible(timeout=1000) and uname:
+                            modal_search.fill(target)
+                            page.wait_for_timeout(1000)
+                            item_checkbox = modal_container.locator("li, [role='listitem'], div[class*='Ewflr']").first
+
                         if item_checkbox.is_visible(timeout=1500):
                             item_checkbox.click()
                             sent.append(target)
@@ -1632,12 +1732,25 @@ def menu_manage_recipients():
         cfg = load_config()
         contacts = cfg.get("contacts", [])
         active_recipients = get_active_recipients(cfg)
+        usernames = cfg.get("usernames", {})
+        streak_data = cfg.get("streak_data", {})
+
+        def format_recipient_choice(name):
+            u = usernames.get(name)
+            st = streak_data.get(name)
+            st_badge = f" ({st} 🔥)" if st else ""
+            if u and u.lower() != name.lower():
+                return f"{name} (@{u}){st_badge}"
+            elif u:
+                return f"@{u}{st_badge}"
+            return f"{name}{st_badge}"
 
         choices = [
             Choice(
                 f"☑️  Select Recipients ({len(active_recipients)} of {len(contacts)} active)" if CURRENT_LANG == "en" else f"☑️  Pilih Penerima ({len(active_recipients)} dari {len(contacts)} aktif)",
                 value="checklist"
             ),
+            Choice("✏️  Edit / Set Friend Username" if CURRENT_LANG == "en" else "✏️  Atur / Ubah Username Teman", value="edit_username"),
             Choice("💬 Edit Default Caption" if CURRENT_LANG == "en" else "💬 Ubah Caption Default", value="caption"),
             Choice("👁️  Preview Recipient List" if CURRENT_LANG == "en" else "👁️  Lihat Daftar Penerima", value="preview"),
             Separator(),
@@ -1658,7 +1771,7 @@ def menu_manage_recipients():
                 continue
 
             choices_c = [
-                Choice(title=c, value=c, checked=(c in active_recipients))
+                Choice(title=format_recipient_choice(c), value=c, checked=(c in active_recipients))
                 for c in contacts
             ]
 
@@ -1676,6 +1789,35 @@ def menu_manage_recipients():
                 print(f"\n[✓] Saved! {len(selected)} of {len(contacts)} friends selected.\n" if CURRENT_LANG == "en" else f"\n[✓] Tersimpan! {len(selected)} dari {len(contacts)} teman dipilih.\n")
                 questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
+        elif action == "edit_username":
+            if not contacts:
+                print("\n[!] No friends saved.\n" if CURRENT_LANG == "en" else "\n[!] Belum ada teman tersimpan.\n")
+                questionary.press_any_key_to_continue(t("press_key_continue")).ask()
+                continue
+            friend_choices = [
+                Choice(title=format_recipient_choice(c), value=c)
+                for c in contacts
+            ] + [Separator(), Choice(t("recip_back"), value="back")]
+            chosen = questionary.select(
+                "Select friend to set/edit username:" if CURRENT_LANG == "en" else "Pilih teman untuk atur/ubah username:",
+                choices=friend_choices
+            ).ask()
+            if chosen and chosen != "back":
+                current_u = usernames.get(chosen, "")
+                new_u = questionary.text(
+                    f"Username for '{chosen}':" if CURRENT_LANG == "en" else f"Username untuk '{chosen}':",
+                    default=current_u
+                ).ask()
+                if new_u is not None:
+                    new_u = new_u.strip().lstrip("@")
+                    if new_u:
+                        cfg.setdefault("usernames", {})[chosen] = new_u
+                    elif chosen in cfg.get("usernames", {}):
+                        del cfg["usernames"][chosen]
+                    save_config(cfg)
+                    print("\n[✓] Username updated!\n" if CURRENT_LANG == "en" else "\n[✓] Username berhasil diperbarui!\n")
+                    questionary.press_any_key_to_continue(t("press_key_continue")).ask()
+
         elif action == "caption":
             curr_def = cfg.get("default_caption", "🔥")
             new_def = questionary.text("Default Snap Caption:" if CURRENT_LANG == "en" else "Caption Default Snap:", default=curr_def).ask()
@@ -1685,19 +1827,14 @@ def menu_manage_recipients():
                 print("\n[✓] Saved!\n")
 
         elif action == "preview":
-            print("\n" + "=" * 55)
+            print("\n" + "=" * 60)
             print("📋 ACTIVE RECIPIENTS (Will receive streak 🔥):" if CURRENT_LANG == "en" else "📋 PENERIMA AKTIF (Menerima streak 🔥):")
-            print("=" * 55)
+            print("=" * 60)
             for idx, c in enumerate(contacts, 1):
                 status = "✅ YES" if c in active_recipients else "❌ SKIP"
-                print(f" {idx:2d}. {c:<30} [{status}]")
-            print("=" * 55 + "\n")
-            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
-            for s in sample:
-                cap = resolve_caption_for_contact(s)
-                print(f"  To     : {s}")
-                print(f"  Caption: '{cap}'\n")
-            print("=" * 65 + "\n")
+                disp = format_recipient_choice(c)
+                print(f" {idx:2d}. {disp:<38} [{status}]")
+            print("=" * 60 + "\n")
             questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
 def show_telegram_guide():
