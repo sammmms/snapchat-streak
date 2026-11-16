@@ -23,7 +23,7 @@ from datetime import datetime, date, timedelta
 OS_NAME = platform.system()
 IS_CRON = "--cron" in sys.argv
 APP_NAME = "snapchat-streak"
-CURRENT_VERSION = "1.4.2"
+CURRENT_VERSION = "1.4.3"
 
 PRIMARY_UPDATE_URL = f"https://script.wsnsam.my.id/api/updates?app={APP_NAME}"
 FALLBACK_UPDATE_URL = f"https://raw.githubusercontent.com/sammmms/{APP_NAME}/main/version.json"
@@ -983,18 +983,13 @@ def launch_browser_context(p, headless: bool = True):
     ensure_dirs()
     user_agent = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     )
-
-    storage = STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None
 
     launch_args = [
         "--disable-blink-features=AutomationControlled",
         "--use-fake-ui-for-media-stream",
         "--use-fake-device-for-media-stream",
-        "--disable-features=IsolateOrigins,site-per-process",
-        "--allow-running-insecure-content",
-        "--disable-web-security"
     ]
 
     def setup_context(ctx):
@@ -1005,21 +1000,10 @@ def launch_browser_context(p, headless: bool = True):
             Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
             window.chrome = { runtime: {} };
         """)
+        restore_auth_session(ctx)
         return ctx
 
-    try:
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=PROFILE_DIR,
-            headless=headless,
-            viewport={"width": 1440, "height": 900},
-            user_agent=user_agent,
-            args=launch_args,
-            storage_state=storage
-        )
-        return setup_context(context)
-    except Exception:
-        pass
-
+    # 1. Try launching Google Chrome with persistent profile (Best compatibility)
     try:
         context = p.chromium.launch_persistent_context(
             user_data_dir=PROFILE_DIR,
@@ -1027,27 +1011,49 @@ def launch_browser_context(p, headless: bool = True):
             headless=headless,
             viewport={"width": 1440, "height": 900},
             user_agent=user_agent,
-            args=launch_args,
-            storage_state=storage
+            args=launch_args
         )
         return setup_context(context)
     except Exception:
         pass
 
+    # 2. Try default Chromium with persistent profile
+    try:
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=PROFILE_DIR,
+            headless=headless,
+            viewport={"width": 1440, "height": 900},
+            user_agent=user_agent,
+            args=launch_args
+        )
+        return setup_context(context)
+    except Exception:
+        pass
+
+    # 3. Fallback to launched browser
     try:
         browser = p.chromium.launch(
+            channel="chrome",
             headless=headless,
             args=launch_args
         )
         context = browser.new_context(
             viewport={"width": 1440, "height": 900},
-            user_agent=user_agent,
-            storage_state=storage
+            user_agent=user_agent
         )
-        restore_auth_session(context)
         return setup_context(context)
-    except Exception as e:
-        raise RuntimeError(f"Could not launch browser: {e}")
+    except Exception:
+        pass
+
+    browser = p.chromium.launch(
+        headless=headless,
+        args=launch_args
+    )
+    context = browser.new_context(
+        viewport={"width": 1440, "height": 900},
+        user_agent=user_agent
+    )
+    return setup_context(context)
 
 def is_page_logged_in(page) -> bool:
     try:
@@ -1480,6 +1486,18 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
 
     return sent, failed
 
+def get_active_recipients(cfg) -> list:
+    contacts = cfg.get("contacts", [])
+    if "recipients" in cfg:
+        return [c for c in contacts if c in cfg["recipients"]]
+    if cfg.get("mode") == "groups":
+        group_members = set()
+        for g in cfg.get("groups", {}).values():
+            group_members.update(g.get("members", []))
+        return [c for c in contacts if c in group_members]
+    excludes = cfg.get("select_all", {}).get("exclude", [])
+    return [c for c in contacts if c not in excludes]
+
 def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
     ensure_dirs()
     clean_expired_logs(retention_days=3)
@@ -1493,19 +1511,7 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
         return {"status": "skipped", "message": msg}
 
     cfg = load_config()
-    mode = cfg.get("mode", "all")
-    contacts = cfg.get("contacts", [])
-    groups = cfg.get("groups", {})
-    excludes = cfg.get("select_all", {}).get("exclude", [])
-
-    target_recipients = []
-    if mode == "all":
-        target_recipients = [c for c in contacts if c not in excludes]
-    else:
-        for g_name, g_info in groups.items():
-            for m in g_info.get("members", []):
-                if m not in target_recipients and m not in excludes:
-                    target_recipients.append(m)
+    target_recipients = get_active_recipients(cfg)
 
     if not target_recipients:
         msg = t("streak_no_targets")
@@ -1590,7 +1596,8 @@ def print_dashboard():
     state = load_state()
     today_str = datetime.now().strftime("%Y-%m-%d")
 
-    mode_label = t("dash_mode_all") if cfg.get("mode") == "all" else t("dash_mode_groups")
+    contacts = cfg.get("contacts", [])
+    active_recips = get_active_recipients(cfg)
     sched_active, sched_desc = get_scheduler_status()
 
     is_logged_in = check_login_status()
@@ -1607,7 +1614,7 @@ def print_dashboard():
     print("==================================================================")
     print(f"{t('dash_account_status')}{login_badge}")
     print(f"{t('dash_today_status')}{status_today}")
-    print(f"{t('dash_recipient_mode')}{mode_label}")
+    print(f"{t('dash_recipient_mode')}{len(active_recips)} active / {len(contacts)} total (Checklist)")
     print(f"{t('dash_schedule')}{sched_badge}")
     print("==================================================================")
 
@@ -1623,104 +1630,51 @@ def print_dashboard():
 def menu_manage_recipients():
     while True:
         cfg = load_config()
-        mode = cfg.get("mode", "all")
-        mode_label = t("dash_mode_all") if mode == "all" else t("dash_mode_groups")
+        contacts = cfg.get("contacts", [])
+        active_recipients = get_active_recipients(cfg)
 
         choices = [
-            Choice(t("recip_toggle_mode", mode=mode_label), value="toggle_mode"),
-            Choice(t("recip_checklist"), value="checklist"),
-            Choice(t("recip_groups"), value="groups"),
-            Choice(t("recip_caption"), value="caption"),
-            Choice(t("recip_exclude"), value="exclude"),
-            Choice(t("recip_preview"), value="preview"),
+            Choice(
+                f"☑️  Select Recipients ({len(active_recipients)} of {len(contacts)} active)" if CURRENT_LANG == "en" else f"☑️  Pilih Penerima ({len(active_recipients)} dari {len(contacts)} aktif)",
+                value="checklist"
+            ),
+            Choice("💬 Edit Default Caption" if CURRENT_LANG == "en" else "💬 Ubah Caption Default", value="caption"),
+            Choice("👁️  Preview Recipient List" if CURRENT_LANG == "en" else "👁️  Lihat Daftar Penerima", value="preview"),
             Separator(),
             Choice(t("recip_back"), value="back")
         ]
 
         action = questionary.select(
-            t("recip_menu_title", mode=mode.upper()),
+            "Manage Streak Recipients:" if CURRENT_LANG == "en" else "Kelola Penerima Streak:",
             choices=choices
         ).ask()
 
         if action in ("back", None):
             break
-        elif action == "toggle_mode":
-            cfg["mode"] = "groups" if mode == "all" else "all"
-            save_config(cfg)
-            log_activity("CONFIG", f"Recipient mode changed to: {cfg['mode'].upper()}")
-            print(t("recip_mode_changed", mode=cfg['mode'].upper()))
         elif action == "checklist":
-            contacts = cfg.get("contacts", [])
             if not contacts:
-                print("\n[!] No contacts saved. Please scan contacts in Account menu first.\n" if CURRENT_LANG == "en" else "\n[!] Belum ada kontak tersimpan. Silakan Pindai Kontak di Menu Akun.\n")
+                print("\n[!] No contacts saved. Please scan friends in Account menu first.\n" if CURRENT_LANG == "en" else "\n[!] Belum ada kontak tersimpan. Silakan Pindai Teman di Menu Akun terlebih dahulu.\n")
                 questionary.press_any_key_to_continue(t("press_key_continue")).ask()
                 continue
-            groups = cfg.get("groups", {})
-            choices_c = []
-            for c in contacts:
-                in_grps = [g for g, d in groups.items() if c in d.get("members", [])]
-                status_str = f"Group: {', '.join(in_grps)}" if in_grps else ("No group" if CURRENT_LANG == "en" else "Belum ada grup")
-                choices_c.append(Choice(title=f"{c:<24} ({status_str})", value=c, checked=len(in_grps) > 0))
+
+            choices_c = [
+                Choice(title=c, value=c, checked=(c in active_recipients))
+                for c in contacts
+            ]
+
+            print("\n💡 Controls: [Space] Toggle, [a] Select All / Invert, [Enter] Save\n" if CURRENT_LANG == "en" else "\n💡 Navigasi: [Spasi] Pilih, [a] Pilih Semua, [Enter] Simpan\n")
 
             selected = questionary.checkbox(
-                "Select contacts to group:" if CURRENT_LANG == "en" else "Pilih kontak untuk dikelompokkan:",
-                choices=choices_c
+                "Select friends who will receive streaks:" if CURRENT_LANG == "en" else "Pilih teman yang akan menerima streak:",
+                choices=choices_c,
+                instruction="(Space: toggle, a: all, Enter: save)" if CURRENT_LANG == "en" else "(Spasi: pilih, a: semua, Enter: simpan)"
             ).ask()
 
-            if selected:
-                g_choices = list(groups.keys()) + [
-                    Separator(),
-                    "➕ Create New Group" if CURRENT_LANG == "en" else "➕ Buat Grup Baru",
-                    "🗑️  Reset / Remove from Groups" if CURRENT_LANG == "en" else "🗑️  Reset / Hapus dari Semua Grup"
-                ]
-                target_grp = questionary.select("Select group:" if CURRENT_LANG == "en" else "Pilih grup:", choices=g_choices).ask()
-                if target_grp and "Create" in target_grp:
-                    new_g = questionary.text("New group name:" if CURRENT_LANG == "en" else "Nama grup baru:").ask()
-                    if new_g and new_g.strip():
-                        groups[new_g.strip()] = {"caption": "🔥", "members": list(selected)}
-                        cfg["groups"] = groups
-                        save_config(cfg)
-                        print("\n[✓] Saved!\n")
-                elif target_grp and "Reset" in target_grp:
-                    for g in groups:
-                        groups[g]["members"] = [m for m in groups[g]["members"] if m not in selected]
-                    cfg["groups"] = groups
-                    save_config(cfg)
-                    print("\n[✓] Reset!\n")
-                elif target_grp:
-                    groups[target_grp]["members"] = list(set(groups[target_grp].get("members", []) + selected))
-                    cfg["groups"] = groups
-                    save_config(cfg)
-                    print("\n[✓] Saved!\n")
-            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
-
-        elif action == "groups":
-            groups = cfg.get("groups", {})
-            print("\n" + "-" * 55)
-            print("🏷️  GROUPS:" if CURRENT_LANG == "en" else "🏷️  DAFTAR GRUP:")
-            print("-" * 55)
-            for g, d in groups.items():
-                print(f" • {g} ({len(d.get('members', []))} members): '{d.get('caption', '🔥')}'")
-            print("-" * 55 + "\n")
-            g_act = questionary.select("Group Action:" if CURRENT_LANG == "en" else "Aksi Grup:", choices=[
-                "➕ Add Group" if CURRENT_LANG == "en" else "➕ Tambah Grup",
-                "✏️  Edit Group Caption" if CURRENT_LANG == "en" else "✏️  Ubah Caption Grup",
-                "🗑️  Delete Group" if CURRENT_LANG == "en" else "🗑️  Hapus Grup",
-                "🔙 Back" if CURRENT_LANG == "en" else "🔙 Kembali"
-            ]).ask()
-            if g_act and "Add" in g_act:
-                gn = questionary.text("Group name:" if CURRENT_LANG == "en" else "Nama grup:").ask()
-                if gn and gn.strip():
-                    gc = questionary.text("Caption:", default="🔥").ask() or "🔥"
-                    groups[gn.strip()] = {"caption": gc, "members": []}
-                    cfg["groups"] = groups
-                    save_config(cfg)
-            elif g_act and "Delete" in g_act:
-                to_del = questionary.select("Select group to delete:" if CURRENT_LANG == "en" else "Pilih grup untuk dihapus:", choices=list(groups.keys())).ask()
-                if to_del and to_del in groups:
-                    del groups[to_del]
-                    cfg["groups"] = groups
-                    save_config(cfg)
+            if selected is not None:
+                cfg["recipients"] = list(selected)
+                save_config(cfg)
+                print(f"\n[✓] Saved! {len(selected)} of {len(contacts)} friends selected.\n" if CURRENT_LANG == "en" else f"\n[✓] Tersimpan! {len(selected)} dari {len(contacts)} teman dipilih.\n")
+                questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
         elif action == "caption":
             curr_def = cfg.get("default_caption", "🔥")
@@ -1730,38 +1684,15 @@ def menu_manage_recipients():
                 save_config(cfg)
                 print("\n[✓] Saved!\n")
 
-        elif action == "exclude":
-            excludes = cfg.get("select_all", {}).get("exclude", [])
-            print("\n" + "-" * 55)
-            print("🚫 EXCLUDE / BLACKLIST:" if CURRENT_LANG == "en" else "🚫 DAFTAR EXCLUDE:")
-            print("-" * 55)
-            for idx, e in enumerate(excludes, 1):
-                print(f" {idx}. {e}")
-            print("-" * 55 + "\n")
-            ex_act = questionary.select("Exclude Action:" if CURRENT_LANG == "en" else "Aksi Exclude:", choices=[
-                "➕ Add Name" if CURRENT_LANG == "en" else "➕ Tambah Nama",
-                "🗑️  Remove Name" if CURRENT_LANG == "en" else "🗑️  Hapus Nama",
-                "🔙 Back" if CURRENT_LANG == "en" else "🔙 Kembali"
-            ]).ask()
-            if ex_act and "Add" in ex_act:
-                nn = questionary.text("Name to exclude:" if CURRENT_LANG == "en" else "Nama untuk dikecualikan:").ask()
-                if nn and nn.strip():
-                    excludes.append(nn.strip())
-                    cfg.setdefault("select_all", {})["exclude"] = excludes
-                    save_config(cfg)
-            elif ex_act and "Remove" in ex_act:
-                if excludes:
-                    to_rem = questionary.checkbox("Select to remove:" if CURRENT_LANG == "en" else "Pilih untuk dihapus:", choices=excludes).ask()
-                    if to_rem:
-                        cfg["select_all"]["exclude"] = [e for e in excludes if e not in to_rem]
-                        save_config(cfg)
-
         elif action == "preview":
-            contacts = cfg.get("contacts", [])
-            print("\n" + "=" * 65)
-            print("👁️  SNAP CAPTION PREVIEW" if CURRENT_LANG == "en" else "👁️  PRATINJAU CAPTION SNAP")
-            print("=" * 65)
-            sample = contacts[:5] if contacts else ["Alice Smith", "Bob Wilson"]
+            print("\n" + "=" * 55)
+            print("📋 ACTIVE RECIPIENTS (Will receive streak 🔥):" if CURRENT_LANG == "en" else "📋 PENERIMA AKTIF (Menerima streak 🔥):")
+            print("=" * 55)
+            for idx, c in enumerate(contacts, 1):
+                status = "✅ YES" if c in active_recipients else "❌ SKIP"
+                print(f" {idx:2d}. {c:<30} [{status}]")
+            print("=" * 55 + "\n")
+            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
             for s in sample:
                 cap = resolve_caption_for_contact(s)
                 print(f"  To     : {s}")

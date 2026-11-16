@@ -1,11 +1,12 @@
 {
   "app": "snapchat-streak",
   "name": "Snapchat Streak Auto-Saver & Helper Hub",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "release_date": "2026-11-16",
   "changelog": [
-    "🛡️ Disable repetitive cron retry loops and suppress cron runs when login session expired",
-    "🔒 Abort immediately on login session expiration to prevent duplicate notification spam"
+    "👥 Simplified Manage Recipients: direct multi-select checklist from detected friends without complex groups",
+    "🌐 Fixed 'Browser not supported' and login error on Snapchat Web by adopting Chrome channel & modern user agent",
+    "🛡️ Suppress repetitive cron retry loops and hourly alerts on session expiry"
   ],
   "download_url": "https://raw.githubusercontent.com/sammmms/snapchat-streak/main/snapchat-streak.py"
 }
