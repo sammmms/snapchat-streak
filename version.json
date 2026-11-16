@@ -1,12 +1,11 @@
 {
   "app": "snapchat-streak",
   "name": "Snapchat Streak Auto-Saver & Helper Hub",
-  "version": "1.4.1",
-  "release_date": "2026-11-15",
+  "version": "1.4.2",
+  "release_date": "2026-11-16",
   "changelog": [
-    "🌐 Support for updated Snapchat Web URL routing (/web/ and web.snapchat.com)",
-    "🔒 Real-time session expiry detection and invalidation of stale auth files",
-    "🛡️ Fixed marketing page false-positive login detection"
+    "🛡️ Disable repetitive cron retry loops and suppress cron runs when login session expired",
+    "🔒 Abort immediately on login session expiration to prevent duplicate notification spam"
   ],
   "download_url": "https://raw.githubusercontent.com/sammmms/snapchat-streak/main/snapchat-streak.py"
 }

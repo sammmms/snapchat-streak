@@ -23,7 +23,7 @@ from datetime import datetime, date, timedelta
 OS_NAME = platform.system()
 IS_CRON = "--cron" in sys.argv
 APP_NAME = "snapchat-streak"
-CURRENT_VERSION = "1.4.1"
+CURRENT_VERSION = "1.4.2"
 
 PRIMARY_UPDATE_URL = f"https://script.wsnsam.my.id/api/updates?app={APP_NAME}"
 FALLBACK_UPDATE_URL = f"https://raw.githubusercontent.com/sammmms/{APP_NAME}/main/version.json"
@@ -568,16 +568,21 @@ def load_state() -> dict:
         "summary": "Never executed"
     }
 
-def save_state(success: bool, sent: int, failed: int, summary: str = ""):
+def save_state(success: bool, sent: int, failed: int, summary: str = "", session_expired: bool = None):
     now = datetime.now()
-    state = {
+    state = load_state()
+    state.update({
         "last_date": now.strftime("%Y-%m-%d"),
         "last_time": now.strftime("%H:%M:%S"),
         "success": success,
         "sent_count": sent,
         "failed_count": failed,
         "summary": summary
-    }
+    })
+    if session_expired is not None:
+        state["session_expired"] = session_expired
+    elif success:
+        state["session_expired"] = False
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
@@ -1078,8 +1083,13 @@ def is_page_logged_in(page) -> bool:
 def check_login_status() -> bool:
     try:
         st = load_state()
-        if not st.get("success", True) and "session expired" in str(st.get("summary", "")).lower():
+        if st.get("session_expired"):
             return False
+        if not st.get("success", True) and "session expired" in str(st.get("summary", "")).lower():
+            st_mtime = os.path.getmtime(STATE_FILE) if os.path.exists(STATE_FILE) else 0
+            auth_mtime = os.path.getmtime(STORAGE_STATE_FILE) if os.path.exists(STORAGE_STATE_FILE) else 0
+            if auth_mtime <= st_mtime:
+                return False
     except Exception:
         pass
 
@@ -1207,6 +1217,7 @@ def interactive_login():
     if login_confirmed:
         print(t("login_success"))
         log_activity("AUTH", "Snapchat login successful and verified.")
+        save_state(True, 0, 0, "Logged in successfully", session_expired=False)
         scan_snapchat_friends(verbose=True)
     else:
         print(t("login_failed_prompt"))
@@ -1218,6 +1229,11 @@ def logout_snapchat(verbose: bool = True) -> bool:
         if os.path.exists(PROFILE_DIR):
             shutil.rmtree(PROFILE_DIR, ignore_errors=True)
             os.makedirs(PROFILE_DIR, exist_ok=True)
+
+        st = load_state()
+        st["session_expired"] = True
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(st, f, indent=2)
 
         cfg = load_config()
         cfg["contacts"] = []
@@ -1519,7 +1535,7 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
             if not is_page_logged_in(page):
                 err_msg = t("streak_session_expired")
                 log_activity("JOB", err_msg)
-                save_state(False, 0, len(target_recipients), err_msg)
+                save_state(False, 0, len(target_recipients), err_msg, session_expired=True)
                 if os.path.exists(STORAGE_STATE_FILE):
                     try:
                         os.remove(STORAGE_STATE_FILE)
@@ -1527,7 +1543,7 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
                         pass
                 send_notification(t("notif_streak_fail_title"), err_msg, success=False)
                 context.close()
-                return {"status": "error", "message": err_msg}
+                return {"status": "error", "message": err_msg, "is_auth_error": True}
 
             default_cap = cfg.get("default_caption", "🔥")
             resolved_cap = format_caption(default_cap, target_recipients[0] if target_recipients else ("Friend" if CURRENT_LANG == "en" else "Teman"))
@@ -2077,8 +2093,21 @@ def interactive_hub():
 # CLI Entry Point & Background Worker
 # ==============================================================================
 
-def run_cron_job(max_retries: int = 3, retry_delay: int = 40):
+def run_cron_job(max_retries: int = 1, retry_delay: int = 40):
     log_activity("SYSTEM", "Snapchat Streak auto-worker triggered by scheduler.")
+
+    state = load_state()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    # If streak already succeeded today, skip
+    if state.get("last_date") == today_str and state.get("success"):
+        log_activity("SYSTEM", f"Cron check: Streak today ({today_str}) already sent. Done.")
+        return
+
+    # If session is marked as expired, do not keep retrying or spamming notifications every hour
+    if state.get("session_expired"):
+        log_activity("SYSTEM", "Cron skipped: Snapchat login session expired. Please log in via terminal menu.")
+        return
 
     if not wait_for_internet(timeout=180, verbose=False):
         err = "Cron cancelled: Laptop not connected to internet after 180s."
@@ -2098,11 +2127,15 @@ def run_cron_job(max_retries: int = 3, retry_delay: int = 40):
             return
         else:
             msg = res.get("message", st)
-            log_activity("SYSTEM", f"Cron attempt #{attempt} failed ({msg}). Retrying in {retry_delay}s...")
+            log_activity("SYSTEM", f"Cron attempt #{attempt} failed ({msg}).")
+            if res.get("is_auth_error") or "login session expired" in str(msg).lower():
+                log_activity("SYSTEM", "Cron aborted: Login required. Will not retry until logged in.")
+                return
             if attempt < max_retries:
+                log_activity("SYSTEM", f"Retrying in {retry_delay}s...")
                 time.sleep(retry_delay)
 
-    log_activity("SYSTEM", f"Cron failed after {max_retries} attempts.")
+    log_activity("SYSTEM", f"Cron finished after {max_retries} attempts.")
 
 def main():
     parser = argparse.ArgumentParser(description="Snapchat Streak Auto-Saver Hub")
