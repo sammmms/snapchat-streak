@@ -101,6 +101,7 @@ TRANSLATIONS = {
         "menu_opt_run_need_login": "🚀 Send Streak Now (Login Required)",
         "menu_opt_run": "🚀 Send Streak Now (Run Snap Check-in)",
         "menu_opt_recipients": "👥 Manage Recipients & Caption (Recipients, Groups & Templates)",
+        "menu_opt_speed": "⚡ Dispatch Speed & Safety (Pace & Browser Mode)",
         "menu_opt_scheduler": "⏰ Daily Auto Schedule (LaunchAgent @ {time} + Wake-up Catch-up)",
         "menu_opt_logs": "📜 Activity History & Logs (3-Day Retention)",
         "menu_opt_account": "🔑 Account & Scan Contacts (Login & Scan Snapchat Friends)",
@@ -237,6 +238,7 @@ TRANSLATIONS = {
         "menu_opt_run_need_login": "🚀 Kirim Streak Sekarang (Perlu Login Terlebih Dahulu)",
         "menu_opt_run": "🚀 Kirim Streak Sekarang (Run Snap Check-in)",
         "menu_opt_recipients": "👥 Kelola Penerima & Caption (Penerima, Grup & Template)",
+        "menu_opt_speed": "⚡ Pengaturan Kecepatan & Keamanan (Pace & Mode Browser)",
         "menu_opt_scheduler": "⏰ Jadwal Otomatis Harian (LaunchAgent @ {time} + Wake-up Catch-up)",
         "menu_opt_logs": "📜 Riwayat Aktivitas & Log (Tersimpan 3 Hari)",
         "menu_opt_account": "🔑 Akun & Pindai Kontak (Login & Scan Teman Snapchat)",
@@ -692,14 +694,35 @@ def resolve_caption_for_contact(contact_name: str, group_caption: str = None) ->
     return format_caption(default_cap, contact_name)
 
 def get_action_delay() -> float:
-    return round(random.uniform(2.5, 4.0), 2)
+    cfg = load_config()
+    pace = cfg.get("safety", {}).get("pace", "normal")
+    if pace == "fast":
+        return round(random.uniform(1.2, 2.0), 2)
+    elif pace == "relaxed":
+        return round(random.uniform(5.0, 7.5), 2)
+    else:  # normal
+        return round(random.uniform(2.5, 4.0), 2)
 
 def is_within_safe_hours() -> tuple:
-    now = datetime.now()
-    current_time = (now.hour, now.minute)
-    is_safe = (7, 0) <= current_time <= (23, 0)
-    desc = f"{now.hour:02d}:{now.minute:02d} (Safe: 07:00 - 23:00)" if CURRENT_LANG == "en" else f"{now.hour:02d}:{now.minute:02d} (Aman: 07:00 - 23:00)"
-    return is_safe, desc
+    cfg = load_config()
+    safe_cfg = cfg.get("safety", {}).get("safe_hours", {})
+    if not safe_cfg.get("enabled", True):
+        return True, "Safe hours restriction disabled"
+
+    now_hour = datetime.now().hour
+    start = safe_cfg.get("start", 7)
+    end = safe_cfg.get("end", 23)
+
+    if start <= end:
+        in_range = start <= now_hour < end
+    else:
+        in_range = now_hour >= start or now_hour < end
+
+    if in_range:
+        return True, "Within safe hours"
+    else:
+        reason = f"Outside safe dispatch hours ({start:02d}:00 - {end:02d}:00)" if CURRENT_LANG == "en" else f"Di luar jam aman pengiriman ({start:02d}:00 - {end:02d}:00)"
+        return False, reason
 
 def wait_for_internet(timeout: int = 180, check_interval: int = 2, verbose: bool = False) -> bool:
     start_time = time.time()
@@ -1556,7 +1579,7 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
                             item_checkbox.click()
                             sent.append(target)
                             modal_search.fill("")
-                            page.wait_for_timeout(400)
+                            page.wait_for_timeout(int(get_action_delay() * 1000))
                         else:
                             failed.append(target)
                     else:
@@ -1714,7 +1737,8 @@ def print_dashboard():
     print("==================================================================")
     print(f"{t('dash_account_status')}{login_badge}")
     print(f"{t('dash_today_status')}{status_today}")
-    print(f"{t('dash_recipient_mode')}{len(active_recips)} active / {len(contacts)} total (Checklist)")
+    pace_name = cfg.get("safety", {}).get("pace", "normal").capitalize()
+    print(f"{t('dash_recipient_mode')}{len(active_recips)} active / {len(contacts)} total (Checklist) | ⚡ Pace: {pace_name}")
     print(f"{t('dash_schedule')}{sched_badge}")
     print("==================================================================")
 
@@ -1750,6 +1774,7 @@ def menu_manage_recipients():
                 f"☑️  Select Recipients ({len(active_recipients)} of {len(contacts)} active)" if CURRENT_LANG == "en" else f"☑️  Pilih Penerima ({len(active_recipients)} dari {len(contacts)} aktif)",
                 value="checklist"
             ),
+            Choice("⚡ Set Snap Dispatch Speed (Pace)" if CURRENT_LANG == "en" else "⚡ Atur Kecepatan Pengiriman Snap", value="speed"),
             Choice("✏️  Edit / Set Friend Username" if CURRENT_LANG == "en" else "✏️  Atur / Ubah Username Teman", value="edit_username"),
             Choice("💬 Edit Default Caption" if CURRENT_LANG == "en" else "💬 Ubah Caption Default", value="caption"),
             Choice("👁️  Preview Recipient List" if CURRENT_LANG == "en" else "👁️  Lihat Daftar Penerima", value="preview"),
@@ -1764,6 +1789,8 @@ def menu_manage_recipients():
 
         if action in ("back", None):
             break
+        elif action == "speed":
+            menu_safety_settings()
         elif action == "checklist":
             if not contacts:
                 print("\n[!] No contacts saved. Please scan friends in Account menu first.\n" if CURRENT_LANG == "en" else "\n[!] Belum ada kontak tersimpan. Silakan Pindai Teman di Menu Akun terlebih dahulu.\n")
@@ -1835,6 +1862,97 @@ def menu_manage_recipients():
                 disp = format_recipient_choice(c)
                 print(f" {idx:2d}. {disp:<38} [{status}]")
             print("=" * 60 + "\n")
+            questionary.press_any_key_to_continue(t("press_key_continue")).ask()
+
+def menu_safety_settings():
+    while True:
+        cfg = load_config()
+        safety = cfg.setdefault("safety", {})
+        pace = safety.get("pace", "normal")
+        safe_hours = safety.get("safe_hours", {"enabled": True, "start": 7, "end": 23})
+        headless = cfg.get("headless", True)
+
+        pace_label = {
+            "fast": "🚀 Fast (1.2 - 2.0s)" if CURRENT_LANG == "en" else "🚀 Cepat (1.2 - 2.0 detik)",
+            "normal": "⚡ Normal / Natural (2.5 - 4.0s)" if CURRENT_LANG == "en" else "⚡ Normal / Natural (2.5 - 4.0 detik)",
+            "relaxed": "🛡️ Relaxed / Anti-Limit (5.0 - 7.5s)" if CURRENT_LANG == "en" else "🛡️ Santai / Anti-Limit (5.0 - 7.5 detik)"
+        }.get(pace, "⚡ Normal (2.5 - 4.0s)")
+
+        sh_status = (f"🟢 Active ({safe_hours.get('start', 7):02d}:00 - {safe_hours.get('end', 23):02d}:00)" if CURRENT_LANG == "en" else f"🟢 Aktif ({safe_hours.get('start', 7):02d}:00 - {safe_hours.get('end', 23):02d}:00)") if safe_hours.get("enabled", True) else ("⚪ Disabled" if CURRENT_LANG == "en" else "⚪ Nonaktif")
+        hl_status = ("🟢 Background (Headless)" if CURRENT_LANG == "en" else "🟢 Latar Belakang (Headless)") if headless else ("🖥️ Visible Window" if CURRENT_LANG == "en" else "🖥️ Jendela Terlihat")
+
+        choices = [
+            Choice(f"⚡ {'Dispatch Speed / Pace:' if CURRENT_LANG == 'en' else 'Kecepatan Pengiriman:'} {pace_label}", value="change_pace"),
+            Choice(f"🌙 {'Safe Dispatch Hours:' if CURRENT_LANG == 'en' else 'Batas Jam Aman:'} {sh_status}", value="toggle_safe_hours"),
+            Choice(f"🖥️  {'Browser Window Mode:' if CURRENT_LANG == 'en' else 'Mode Jendela Browser:'} {hl_status}", value="toggle_headless"),
+            Separator(),
+            Choice(t("recip_back"), value="back")
+        ]
+
+        action = questionary.select(
+            "⚙️  Dispatch Speed & Safety Settings:" if CURRENT_LANG == "en" else "⚙️  Pengaturan Kecepatan & Keamanan Pengiriman:",
+            choices=choices
+        ).ask()
+
+        if action in ("back", None):
+            break
+
+        if action == "change_pace":
+            new_pace = questionary.select(
+                "Select snap dispatch speed / delay between actions:" if CURRENT_LANG == "en" else "Pilih kecepatan jeda pengiriman snap:",
+                choices=[
+                    Choice("⚡ Normal / Natural (2.5 - 4.0s) [Recommended]" if CURRENT_LANG == "en" else "⚡ Normal / Natural (Jeda 2.5 - 4.0 detik) [Direkomendasikan]", value="normal"),
+                    Choice("🚀 Fast (1.2 - 2.0s) [Faster dispatch]" if CURRENT_LANG == "en" else "🚀 Cepat (Jeda 1.2 - 2.0 detik) [Pengiriman lebih cepat]", value="fast"),
+                    Choice("🛡️ Relaxed (5.0 - 7.5s) [Maximum safety / anti-limit]" if CURRENT_LANG == "en" else "🛡️ Santai (Jeda 5.0 - 7.5 detik) [Aman maksimal anti-limit]", value="relaxed")
+                ]
+            ).ask()
+            if new_pace:
+                cfg.setdefault("safety", {})["pace"] = new_pace
+                save_config(cfg)
+                log_activity("CONFIG", f"Snap dispatch speed updated to: {new_pace.upper()}")
+                print(f"\n[✓] {'Dispatch speed updated to:' if CURRENT_LANG == 'en' else 'Kecepatan pengiriman diubah ke:'} {new_pace.upper()}\n")
+                questionary.press_any_key_to_continue(t("press_key_continue")).ask()
+
+        elif action == "toggle_safe_hours":
+            is_enabled = safe_hours.get("enabled", True)
+            toggle_choice = questionary.select(
+                "Safe Hours Settings:" if CURRENT_LANG == "en" else "Pengaturan Batas Jam Aman:",
+                choices=[
+                    Choice(f"{'⚪ Disable' if is_enabled else '🟢 Enable'} Safe Hours" if CURRENT_LANG == "en" else f"{'⚪ Matikan' if is_enabled else '🟢 Aktifkan'} Batas Jam Aman", value="toggle"),
+                    Choice("🕒 Change Safe Hours Range" if CURRENT_LANG == "en" else "🕒 Ubah Rentang Jam Aman", value="edit_hours"),
+                    Choice("🔙 Cancel" if CURRENT_LANG == "en" else "🔙 Batal", value="back")
+                ]
+            ).ask()
+            if toggle_choice == "toggle":
+                safe_hours["enabled"] = not is_enabled
+                cfg.setdefault("safety", {})["safe_hours"] = safe_hours
+                save_config(cfg)
+                status = "ENABLED" if safe_hours["enabled"] else "DISABLED"
+                log_activity("CONFIG", f"Safe hours changed to: {status}")
+                print(f"\n[✓] Safe hours: {status}\n")
+                questionary.press_any_key_to_continue(t("press_key_continue")).ask()
+            elif toggle_choice == "edit_hours":
+                s_str = questionary.text("Start hour (0-23):" if CURRENT_LANG == "en" else "Mulai jam berapa (0-23):", default=str(safe_hours.get("start", 7))).ask()
+                e_str = questionary.text("End hour (0-23):" if CURRENT_LANG == "en" else "Sampai jam berapa (0-23):", default=str(safe_hours.get("end", 23))).ask()
+                try:
+                    s_int = int(s_str)
+                    e_int = int(e_str)
+                    if 0 <= s_int <= 23 and 0 <= e_int <= 23:
+                        safe_hours["start"] = s_int
+                        safe_hours["end"] = e_int
+                        cfg.setdefault("safety", {})["safe_hours"] = safe_hours
+                        save_config(cfg)
+                        print(f"\n[✓] Safe hours range updated: {s_int:02d}:00 - {e_int:02d}:00\n")
+                        questionary.press_any_key_to_continue(t("press_key_continue")).ask()
+                except ValueError:
+                    print("\n[!] Invalid hour format.\n")
+
+        elif action == "toggle_headless":
+            cfg["headless"] = not headless
+            save_config(cfg)
+            status = "HEADLESS (Background)" if cfg["headless"] else "VISIBLE WINDOW"
+            log_activity("CONFIG", f"Browser mode changed to: {status}")
+            print(f"\n[✓] Browser display mode: {status}\n")
             questionary.press_any_key_to_continue(t("press_key_continue")).ask()
 
 def show_telegram_guide():
@@ -2099,6 +2217,7 @@ def interactive_hub():
                 Choice(t("menu_opt_login_req"), value="login"),
                 Choice(t("menu_opt_run_need_login"), value="run"),
                 Choice(t("menu_opt_recipients"), value="recipients"),
+                Choice(t("menu_opt_speed"), value="safety"),
                 Choice(t("menu_opt_scheduler", time=time_str), value="scheduler"),
                 Choice(t("menu_opt_logs"), value="logs"),
                 Choice(t("menu_opt_notifications"), value="notifications"),
@@ -2111,6 +2230,7 @@ def interactive_hub():
             choices = [
                 Choice(t("menu_opt_run"), value="run"),
                 Choice(t("menu_opt_recipients"), value="recipients"),
+                Choice(t("menu_opt_speed"), value="safety"),
                 Choice(t("menu_opt_scheduler", time=time_str), value="scheduler"),
                 Choice(t("menu_opt_logs"), value="logs"),
                 Choice(t("menu_opt_account"), value="account"),
@@ -2144,6 +2264,8 @@ def interactive_hub():
                 questionary.press_any_key_to_continue(t("press_key_return")).ask()
         elif action == "recipients":
             menu_manage_recipients()
+        elif action == "safety":
+            menu_safety_settings()
         elif action == "scheduler":
             menu_manage_scheduler()
         elif action == "logs":
