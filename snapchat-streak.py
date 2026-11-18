@@ -15,6 +15,7 @@ import time
 import random
 import signal
 import socket
+import shutil
 import platform
 import argparse
 import subprocess
@@ -1560,6 +1561,7 @@ def take_and_send_snap(page, recipient_names: list, caption_text: str = "🔥") 
         if not selected_via_shortcut:
             modal_container = page.locator(".Zoysu, .SZJHC, form.tvul8").first
             modal_search = modal_container.locator("input").first
+            cfg = load_config()
             usernames = cfg.get("usernames", {})
 
             for target in recipient_names:
@@ -1635,6 +1637,7 @@ def run_send_streak(force: bool = False, verbose: bool = True) -> dict:
 
     cfg = load_config()
     target_recipients = get_active_recipients(cfg)
+    mode = "checklist" if "recipients" in cfg else cfg.get("mode", "all")
 
     if not target_recipients:
         msg = t("streak_no_targets")
