@@ -68,35 +68,32 @@ fi
 
 # 6. Setup macOS LaunchAgent with multi-interval wake-up catch-up
 if [ "$(uname)" = "Darwin" ]; then
-    PLIST_PATH="$HOME/Library/LaunchAgents/com.user.snapchatstreak.plist"
+    PLIST_PATH="$HOME/Library/LaunchAgents/com.user.snapchat-streak.plist"
+    OLD_PLIST_PATH="$HOME/Library/LaunchAgents/com.user.snapchatstreak.plist"
+
+    # Bersihkan plist lama jika ada
+    launchctl unload "$OLD_PLIST_PATH" 2>/dev/null || true
+    rm -f "$OLD_PLIST_PATH"
+
     cat <<EOF > "$PLIST_PATH"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.user.snapchatstreak</string>
+    <string>com.user.snapchat-streak</string>
     <key>ProgramArguments</key>
     <array>
         <string>$WRAPPER_FILE</string>
         <string>--cron</string>
     </array>
     <key>StartCalendarInterval</key>
-    <array>
-        <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>0</integer></dict>
-    </array>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
     <key>StandardOutPath</key>
     <string>$INSTALL_DIR/streak.log</string>
     <key>StandardErrorPath</key>
@@ -106,7 +103,7 @@ if [ "$(uname)" = "Darwin" ]; then
 EOF
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     launchctl load "$PLIST_PATH"
-    echo "⏰ Jadwal harian otomatis terdaftar jam 09:00 pagi (dengan macOS wake-up catch-up)!"
+    echo "⏰ Jadwal harian otomatis terdaftar 1x sehari jam 09:00 pagi via macOS LaunchAgent!"
 fi
 
 echo ""

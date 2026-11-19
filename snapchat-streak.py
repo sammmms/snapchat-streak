@@ -849,9 +849,10 @@ def get_scheduler_status() -> tuple:
 
     if OS_NAME == "Darwin":
         plist = os.path.expanduser("~/Library/LaunchAgents/com.user.snapchat-streak.plist")
-        if os.path.exists(plist):
+        old_plist = os.path.expanduser("~/Library/LaunchAgents/com.user.snapchatstreak.plist")
+        if os.path.exists(plist) or os.path.exists(old_plist):
             res = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
-            if "com.user.snapchat-streak" in res.stdout:
+            if "snapchat" in res.stdout:
                 return True, t("sched_macos_active", time=time_str)
             return True, t("sched_macos_loaded")
         return False, t("sched_not_configured")
@@ -877,18 +878,17 @@ def install_scheduler():
 
     if OS_NAME == "Darwin":
         plist_path = os.path.expanduser("~/Library/LaunchAgents/com.user.snapchat-streak.plist")
+        old_plist_path = os.path.expanduser("~/Library/LaunchAgents/com.user.snapchatstreak.plist")
         os.makedirs(os.path.dirname(plist_path), exist_ok=True)
         log_file = os.path.join(BASE_DIR, "streak.log")
 
-        intervals = []
-        for hour in range(h, 24):
-            intervals.append(f"""        <dict>
-            <key>Hour</key>
-            <integer>{hour}</integer>
-            <key>Minute</key>
-            <integer>{m}</integer>
-        </dict>""")
-        intervals_xml = "\n".join(intervals)
+        # Clean up legacy plist if present
+        if os.path.exists(old_plist_path):
+            subprocess.run(["launchctl", "unload", old_plist_path], capture_output=True)
+            try:
+                os.remove(old_plist_path)
+            except OSError:
+                pass
 
         content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -903,9 +903,12 @@ def install_scheduler():
         <string>--cron</string>
     </array>
     <key>StartCalendarInterval</key>
-    <array>
-{intervals_xml}
-    </array>
+    <dict>
+        <key>Hour</key>
+        <integer>{h}</integer>
+        <key>Minute</key>
+        <integer>{m}</integer>
+    </dict>
     <key>StandardOutPath</key>
     <string>{log_file}</string>
     <key>StandardErrorPath</key>
@@ -919,7 +922,7 @@ def install_scheduler():
         subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
         subprocess.run(["launchctl", "load", plist_path], check=True)
         print(t("sched_installed_mac", time=time_str))
-        log_activity("CONFIG", f"Scheduler LaunchAgent installed at {time_str}")
+        log_activity("CONFIG", f"Scheduler LaunchAgent installed at {time_str} (once per day)")
         return True
 
     elif OS_NAME == "Windows":
@@ -951,13 +954,17 @@ def install_scheduler():
 
 def remove_scheduler():
     if OS_NAME == "Darwin":
-        plist_path = os.path.expanduser("~/Library/LaunchAgents/com.user.snapchat-streak.plist")
-        if os.path.exists(plist_path):
-            subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
-            os.remove(plist_path)
-            print(t("sched_removed_mac"))
-            log_activity("CONFIG", "macOS LaunchAgent removed")
-            return True
+        for p in [os.path.expanduser("~/Library/LaunchAgents/com.user.snapchat-streak.plist"),
+                  os.path.expanduser("~/Library/LaunchAgents/com.user.snapchatstreak.plist")]:
+            if os.path.exists(p):
+                subprocess.run(["launchctl", "unload", p], capture_output=True)
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+        print(t("sched_removed_mac"))
+        log_activity("CONFIG", "macOS LaunchAgent removed")
+        return True
     elif OS_NAME == "Windows":
         res = subprocess.run(["schtasks", "/Delete", "/TN", "SnapchatStreakDaily", "/F"], capture_output=True, text=True)
         if res.returncode == 0:
@@ -2292,9 +2299,12 @@ def run_cron_job(max_retries: int = 1, retry_delay: int = 40):
     state = load_state()
     today_str = datetime.now().strftime("%Y-%m-%d")
 
-    # If streak already succeeded today, skip
-    if state.get("last_date") == today_str and state.get("success"):
-        log_activity("SYSTEM", f"Cron check: Streak today ({today_str}) already sent. Done.")
+    # If streak already attempted or succeeded today, skip (leave failures for manual run)
+    if state.get("last_date") == today_str:
+        if state.get("success"):
+            log_activity("SYSTEM", f"Cron check: Streak today ({today_str}) already sent. Done.")
+        else:
+            log_activity("SYSTEM", f"Cron check: Streak already attempted today ({today_str}). Remaining/failed left for manual run.")
         return
 
     # If session is marked as expired, do not keep retrying or spamming notifications every hour
