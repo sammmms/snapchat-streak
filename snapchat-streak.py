@@ -24,7 +24,7 @@ from datetime import datetime, date, timedelta
 OS_NAME = platform.system()
 IS_CRON = "--cron" in sys.argv
 APP_NAME = "snapchat-streak"
-CURRENT_VERSION = "1.4.3"
+CURRENT_VERSION = "1.4.4"
 
 PRIMARY_UPDATE_URL = f"https://script.wsnsam.my.id/api/updates?app={APP_NAME}"
 FALLBACK_UPDATE_URL = f"https://raw.githubusercontent.com/sammmms/{APP_NAME}/main/version.json"

@@ -1,12 +1,12 @@
 {
   "app": "snapchat-streak",
   "name": "Snapchat Streak Auto-Saver & Helper Hub",
-  "version": "1.4.3",
-  "release_date": "2026-11-16",
+  "version": "1.4.4",
+  "release_date": "2026-11-19",
   "changelog": [
-    "👥 Simplified Manage Recipients: direct multi-select checklist from detected friends without complex groups",
-    "🌐 Fixed 'Browser not supported' and login error on Snapchat Web by adopting Chrome channel & modern user agent",
-    "🛡️ Suppress repetitive cron retry loops and hourly alerts on session expiry"
+    "⏰ Fixed LaunchAgent scheduler to trigger strictly once per day (09:00) without 13-hour loop retries",
+    "🛡️ Added daily cron guard: once attempted today, failed snaps are preserved for manual run",
+    "⚡ Restored configurable dispatch speed (pace), safe hours, and browser mode settings"
   ],
   "download_url": "https://raw.githubusercontent.com/sammmms/snapchat-streak/main/snapchat-streak.py"
 }
